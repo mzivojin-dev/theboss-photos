@@ -25,15 +25,19 @@ describe("PhotoIndexRepository", () => {
     mockDb = {
       collection: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
+      startAfter: jest.fn().mockReturnThis(),
       get: jest.fn(),
       doc: jest.fn().mockReturnThis(),
       set: jest.fn(),
     };
     mockDb.collection.mockReturnValue(mockDb);
     mockDb.where.mockReturnValue(mockDb);
+    mockDb.orderBy.mockReturnValue(mockDb);
     mockDb.limit.mockReturnValue(mockDb);
-    mockDb.doc.mockReturnValue(mockDb);
+    mockDb.startAfter.mockReturnValue(mockDb);
+    mockDb.doc.mockReturnValue({ get: jest.fn().mockResolvedValue({ exists: false }) });
     repo = new PhotoIndexRepository(mockDb);
   });
 
