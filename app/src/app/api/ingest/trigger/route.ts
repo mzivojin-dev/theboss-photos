@@ -1,22 +1,38 @@
 import { NextResponse } from "next/server";
-import { google } from "googleapis";
+import { GoogleAuth } from "google-auth-library";
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID!;
 const REGION = process.env.GCP_REGION!;
 const JOB_NAME = process.env.INGEST_JOB_NAME!;
 
 export async function POST() {
-  const auth = new google.auth.GoogleAuth({
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
-  const client = await auth.getClient();
+  try {
+    const auth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+    const token = await auth.getAccessToken();
 
-  const run = google.run({ version: "v2", auth: client as any });
+    const apiUrl =
+      `https://run.googleapis.com/v2/projects/${PROJECT_ID}/locations/${REGION}` +
+      `/jobs/${JOB_NAME}:run`;
 
-  const response = await run.projects.locations.jobs.run({
-    name: `projects/${PROJECT_ID}/locations/${REGION}/jobs/${JOB_NAME}`,
-    requestBody: {},
-  });
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
 
-  return NextResponse.json({ executionName: response.data.name });
+    if (!res.ok) {
+      throw new Error(`Cloud Run API ${res.status}: ${await res.text()}`);
+    }
+
+    const body = await res.json();
+    return NextResponse.json({ executionName: body.name });
+  } catch (err) {
+    console.error("[ingest/trigger]", err);
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 }

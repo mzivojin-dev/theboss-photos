@@ -31,14 +31,14 @@ DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 def run() -> None:
     credentials, _ = google_auth_default(scopes=[
-        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/cloud-platform",
     ])
     credentials.refresh(GoogleAuthRequest())
 
     drive = build("drive", "v3", credentials=credentials)
     gcs = storage.Client(project=PROJECT_ID)
-    db = firestore.Client(project=PROJECT_ID)
+    db = firestore.Client(project=PROJECT_ID, database="photo-lib")
     repo = PhotoIndexRepository(db=db)
 
     previews_bucket = gcs.bucket(PREVIEWS_BUCKET)
@@ -46,8 +46,10 @@ def run() -> None:
 
     # List all ZIP files in the Drive folder
     results = drive.files().list(
-        q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/zip' and trashed=false",
-        fields="files(id, name)",
+        q=f"'{DRIVE_FOLDER_ID}' in parents and name contains '.zip' and trashed=false",
+        fields="files(id, name, mimeType)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
     ).execute()
 
     zip_files = results.get("files", [])
@@ -70,14 +72,18 @@ def run() -> None:
             if entry.is_sidecar:
                 sidecars[entry.name] = entry.read()
 
-        # Second pass: process images
+        # Second pass: process images and videos
         for entry in streamer.list_entries():
-            if not entry.is_image:
+            if not entry.is_image and not entry.is_video:
                 continue
 
-            # Match sidecar: photo.jpg -> photo.jpg.json
-            sidecar_name = entry.name + ".json"
-            sidecar_bytes = sidecars.get(sidecar_name)
+            # Match sidecar by filename prefix: photo.jpg -> photo.jpg.json or photo.jpg(1).json
+            image_filename = entry.name.split("/")[-1]
+            sidecar_bytes = next(
+                (data for path, data in sidecars.items()
+                 if path.split("/")[-1].startswith(image_filename) and path.endswith(".json")),
+                None,
+            )
             if sidecar_bytes is None:
                 log.warning("No sidecar for %s — skipping", entry.name)
                 continue
@@ -96,37 +102,51 @@ def run() -> None:
             filename = entry.name.split("/")[-1]
             base_name = metadata.google_photos_id
 
-            # Generate and upload Preview
-            preview_bytes = generate_preview(raw_bytes)
-            preview_path = f"{base_name}.webp"
-            previews_bucket.blob(preview_path).upload_from_string(
-                preview_bytes, content_type="image/webp"
-            )
-
             # Upload Original
             original_path = f"{base_name}_{filename}"
-            originals_bucket.blob(original_path).upload_from_string(
-                raw_bytes, content_type="image/jpeg"
-            )
+            if entry.is_video:
+                content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/quicktime"
+                originals_bucket.blob(original_path).upload_from_string(raw_bytes, content_type=content_type)
+                repo.upsert(PhotoDoc(
+                    google_photos_id=metadata.google_photos_id,
+                    filename=filename,
+                    taken_at=metadata.taken_at,
+                    original_gcs_path=original_path,
+                    latitude=metadata.latitude,
+                    longitude=metadata.longitude,
+                    media_type="video",
+                ))
+            else:
+                # Generate and upload Preview
+                preview_bytes = generate_preview(raw_bytes)
+                preview_path = f"{base_name}.webp"
+                previews_bucket.blob(preview_path).upload_from_string(
+                    preview_bytes, content_type="image/webp"
+                )
+                originals_bucket.blob(original_path).upload_from_string(
+                    raw_bytes, content_type="image/jpeg"
+                )
+                from PIL import Image
+                from io import BytesIO as _BytesIO
+                img = Image.open(_BytesIO(preview_bytes))
+                width, height = img.size
+                repo.upsert(PhotoDoc(
+                    google_photos_id=metadata.google_photos_id,
+                    filename=filename,
+                    taken_at=metadata.taken_at,
+                    original_gcs_path=original_path,
+                    latitude=metadata.latitude,
+                    longitude=metadata.longitude,
+                    media_type="photo",
+                    preview_gcs_path=preview_path,
+                    width=width,
+                    height=height,
+                ))
 
-            # Determine dimensions from preview
-            from PIL import Image
-            from io import BytesIO as _BytesIO
-            img = Image.open(_BytesIO(preview_bytes))
-            width, height = img.size
-
-            repo.upsert(PhotoDoc(
-                google_photos_id=metadata.google_photos_id,
-                filename=filename,
-                taken_at=metadata.taken_at,
-                preview_gcs_path=preview_path,
-                original_gcs_path=original_path,
-                width=width,
-                height=height,
-                latitude=metadata.latitude,
-                longitude=metadata.longitude,
-            ))
             log.info("Indexed: %s", filename)
+
+        drive.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+        log.info("Deleted archive from Drive: %s", file_name)
 
     log.info("Ingestion complete.")
 

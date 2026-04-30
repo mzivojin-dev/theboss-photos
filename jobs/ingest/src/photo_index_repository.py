@@ -8,12 +8,13 @@ class PhotoDoc:
     google_photos_id: str
     filename: str
     taken_at: datetime
-    preview_gcs_path: str
     original_gcs_path: str
-    width: int
-    height: int
     latitude: Optional[float]
     longitude: Optional[float]
+    media_type: str = "photo"  # "photo" or "video"
+    preview_gcs_path: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
 
 
 class PhotoIndexRepository:
@@ -36,6 +37,7 @@ class PhotoIndexRepository:
             "google_photos_id": doc.google_photos_id,
             "filename": doc.filename,
             "taken_at": doc.taken_at,
+            "media_type": doc.media_type,
             "preview_gcs_path": doc.preview_gcs_path,
             "original_gcs_path": doc.original_gcs_path,
             "width": doc.width,

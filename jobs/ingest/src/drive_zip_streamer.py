@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Iterator
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".wmv"}
 SIDECAR_EXTENSIONS = {".json"}
 
 # Minimum size of End of Central Directory record
@@ -22,14 +23,20 @@ class ZipEntry:
     _compress_type: int
 
     @property
+    def _ext(self) -> str:
+        return ("." + self.name.rsplit(".", 1)[-1].lower()) if "." in self.name else ""
+
+    @property
     def is_image(self) -> bool:
-        ext = "." + self.name.rsplit(".", 1)[-1].lower() if "." in self.name else ""
-        return ext in IMAGE_EXTENSIONS
+        return self._ext in IMAGE_EXTENSIONS
+
+    @property
+    def is_video(self) -> bool:
+        return self._ext in VIDEO_EXTENSIONS
 
     @property
     def is_sidecar(self) -> bool:
-        ext = "." + self.name.rsplit(".", 1)[-1].lower() if "." in self.name else ""
-        return ext in SIDECAR_EXTENSIONS
+        return self._ext in SIDECAR_EXTENSIONS
 
     def read(self) -> bytes:
         return self._streamer._read_entry_bytes(self)
@@ -45,13 +52,12 @@ class DriveZipStreamer:
     def _get_file_size(self) -> int:
         if self._file_size is None:
             resp = self._http.get(self._download_url, headers={"Range": "bytes=0-0"})
-            content_length = resp.headers.get("Content-Length")
-            if content_length:
-                self._file_size = int(content_length)
-            else:
-                # Fallback: read Content-Range
-                cr = resp.headers.get("Content-Range", "")
+            cr = resp.headers.get("Content-Range", "")
+            if "/" in cr:
                 self._file_size = int(cr.split("/")[-1])
+            else:
+                # Fallback: non-range response (e.g. redirect to direct download)
+                self._file_size = int(resp.headers["Content-Length"])
         return self._file_size
 
     def _range_read(self, start: int, end: int) -> bytes:
@@ -61,11 +67,12 @@ class DriveZipStreamer:
     def _find_eocd(self, file_size: int) -> tuple[int, bytes]:
         # Read last 64KB to handle ZIP comments
         search_size = min(65536 + EOCD_SIZE, file_size)
-        tail = self._range_read(file_size - search_size, file_size - 1)
+        start = file_size - search_size
+        tail = self._range_read(start, file_size - 1)
         pos = tail.rfind(EOCD_SIGNATURE)
         if pos == -1:
             raise ValueError("End of Central Directory record not found — not a valid ZIP")
-        eocd_offset = file_size - search_size + pos
+        eocd_offset = start + pos
         return eocd_offset, tail[pos:]
 
     def list_entries(self) -> Iterator[ZipEntry]:

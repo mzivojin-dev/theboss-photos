@@ -25,6 +25,10 @@ export default function Timeline() {
     try {
       const url = cursor ? `/api/photos?cursor=${cursor}` : "/api/photos";
       const res = await fetch(url);
+      if (!res.ok) {
+        console.error("[Timeline] fetch failed", res.status, await res.text());
+        return;
+      }
       const data = await res.json();
       setPhotos((prev) => [...prev, ...data.photos]);
       setCursor(data.nextCursor);

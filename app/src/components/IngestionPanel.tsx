@@ -18,6 +18,7 @@ export default function IngestionPanel() {
 
   const fetchStatus = async () => {
     const res = await fetch("/api/ingest/status");
+    if (!res.ok) return;
     const data = await res.json();
     setStatus(data.status);
     if (data.status !== "RUNNING") {

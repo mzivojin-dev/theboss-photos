@@ -13,10 +13,10 @@ export interface PhotoDoc {
 export interface PhotoResult {
   id: string;
   takenAt: Date;
-  previewGcsPath: string;
+  previewGcsPath: string | null;
   originalGcsPath: string;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
 }
 
 export interface ListOptions {
@@ -35,7 +35,7 @@ export class PhotoIndexRepository {
   async list({ limit, cursor }: ListOptions): Promise<ListResult> {
     let query = this.db
       .collection("photos")
-      .orderBy("takenAt", "desc")
+      .orderBy("taken_at", "desc")
       .limit(limit);
 
     if (cursor) {
@@ -50,11 +50,11 @@ export class PhotoIndexRepository {
       const data = doc.data();
       return {
         id: doc.id,
-        takenAt: data.takenAt.toDate(),
-        previewGcsPath: data.previewGcsPath,
-        originalGcsPath: data.originalGcsPath,
-        width: data.width,
-        height: data.height,
+        takenAt: data.taken_at.toDate(),
+        previewGcsPath: data.preview_gcs_path ?? null,
+        originalGcsPath: data.original_gcs_path,
+        width: data.width ?? null,
+        height: data.height ?? null,
       };
     });
 

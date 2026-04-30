@@ -44,8 +44,8 @@ describe("PhotoIndexRepository", () => {
   describe("list", () => {
     it("returns photos in order from Firestore", async () => {
       const fakeDocs = [
-        { id: "AAA", data: () => ({ ...makeDoc(), takenAt: { toDate: () => new Date("2021-06-01") } }) },
-        { id: "BBB", data: () => ({ ...makeDoc({ googlePhotosId: "BBB" }), takenAt: { toDate: () => new Date("2021-01-01") } }) },
+        { id: "AAA", data: () => ({ ...makeDoc(), taken_at: { toDate: () => new Date("2021-06-01") } }) },
+        { id: "BBB", data: () => ({ ...makeDoc({ googlePhotosId: "BBB" }), taken_at: { toDate: () => new Date("2021-01-01") } }) },
       ];
       mockDb.get.mockResolvedValue({ docs: fakeDocs });
 
@@ -56,7 +56,7 @@ describe("PhotoIndexRepository", () => {
     it("returns nextCursor when more results exist", async () => {
       const fakeDocs = Array.from({ length: 50 }, (_, i) => ({
         id: `ID${i}`,
-        data: () => ({ ...makeDoc(), takenAt: { toDate: () => new Date() } }),
+        data: () => ({ ...makeDoc(), taken_at: { toDate: () => new Date() } }),
       }));
       mockDb.get.mockResolvedValue({ docs: fakeDocs });
 
@@ -66,7 +66,7 @@ describe("PhotoIndexRepository", () => {
 
     it("returns null nextCursor when fewer results than limit", async () => {
       const fakeDocs = [
-        { id: "AAA", data: () => ({ ...makeDoc(), takenAt: { toDate: () => new Date() } }) },
+        { id: "AAA", data: () => ({ ...makeDoc(), taken_at: { toDate: () => new Date() } }) },
       ];
       mockDb.get.mockResolvedValue({ docs: fakeDocs });
 
