@@ -4,6 +4,7 @@ export interface PhotoDoc {
   takenAt: Date;
   previewGcsPath: string;
   originalGcsPath: string;
+  youtubeVideoId?: string;
   width: number;
   height: number;
   latitude: number | null;
@@ -15,6 +16,7 @@ export interface PhotoResult {
   takenAt: Date;
   previewGcsPath: string | null;
   originalGcsPath: string;
+  youtubeVideoId?: string;
   width: number | null;
   height: number | null;
 }
@@ -53,6 +55,7 @@ export class PhotoIndexRepository {
         takenAt: data.taken_at.toDate(),
         previewGcsPath: data.preview_gcs_path ?? null,
         originalGcsPath: data.original_gcs_path,
+        youtubeVideoId: data.youtube_video_id ?? undefined,
         width: data.width ?? null,
         height: data.height ?? null,
       };
