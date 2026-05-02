@@ -8,11 +8,12 @@ class PhotoDoc:
     google_photos_id: str
     filename: str
     taken_at: datetime
-    original_gcs_path: str
     latitude: Optional[float]
     longitude: Optional[float]
     media_type: str = "photo"  # "photo" or "video"
+    original_gcs_path: Optional[str] = None
     preview_gcs_path: Optional[str] = None
+    youtube_video_id: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
 
@@ -39,10 +40,13 @@ class PhotoIndexRepository:
             "taken_at": doc.taken_at,
             "media_type": doc.media_type,
             "preview_gcs_path": doc.preview_gcs_path,
-            "original_gcs_path": doc.original_gcs_path,
             "width": doc.width,
             "height": doc.height,
             "latitude": doc.latitude,
             "longitude": doc.longitude,
         }
+        if doc.youtube_video_id is not None:
+            data["youtube_video_id"] = doc.youtube_video_id
+        else:
+            data["original_gcs_path"] = doc.original_gcs_path
         self._db.collection(self.COLLECTION).document(doc.google_photos_id).set(data)
