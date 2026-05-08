@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
         previewUrl: photo.previewGcsPath
           ? await generateSignedPreviewUrl(photo.previewGcsPath, previewsBucket())
           : null,
+        youtubeVideoId: photo.youtubeVideoId,
         width: photo.width,
         height: photo.height,
       }))

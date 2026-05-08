@@ -8,3 +8,4 @@ google-cloud-secret-manager==2.20.0
 Pillow==11.2.1
 pillow-heif==0.21.0
 requests==2.32.2
+python-dotenv==1.2.2

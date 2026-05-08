@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud storage:*)",
+      "Bash(gcloud auth:*)",
+      "Bash(TERRAFORM=\"C:/Users/mzivo/AppData/Local/Microsoft/WinGet/Packages/Hashicorp.Terraform_Microsoft.Winget.Source_8wekyb3d8bbwe/terraform.exe\")",
+      "Bash(\"$TERRAFORM\" apply:*)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(gcloud run:*)",
+      "Bash(gcloud projects:*)",
+      "Bash(pytest)",
+      "Bash(gh issue *)",
+      "Bash(gh label *)",
+      "Bash(python -m pytest tests/test_resume_state.py -v)",
+      "Bash(gh pr *)",
+      "Bash(pip install *)",
+      "Bash(python -m pytest tests/test_youtube_uploader.py -v)",
+      "Bash(git worktree *)",
+      "Bash(git -C .claude/worktrees/issue-6 merge --no-edit worktree-agent-a72cf763e5d3b4b41)",
+      "Bash(git -C .claude/worktrees/issue-7 merge --no-edit worktree-agent-a0a761d2300f9bb95)",
+      "Bash(git -C .claude/worktrees/issue-7 merge --no-edit worktree-agent-a72cf763e5d3b4b41)",
+      "Bash(python -m pytest tests/test_local_main.py -v)"
+    ]
+  }
+}

@@ -73,5 +73,44 @@ describe("PhotoIndexRepository", () => {
       const result = await repo.list({ limit: 50 });
       expect(result.nextCursor).toBeNull();
     });
+
+    it("maps youtube_video_id from Firestore to youtubeVideoId in result", async () => {
+      const fakeDocs = [
+        {
+          id: "VID1",
+          data: () => ({
+            taken_at: { toDate: () => new Date("2023-07-15") },
+            youtube_video_id: "yt-abc-123",
+            preview_gcs_path: null,
+            original_gcs_path: null,
+            width: null,
+            height: null,
+          }),
+        },
+      ];
+      mockDb.get.mockResolvedValue({ docs: fakeDocs });
+
+      const result = await repo.list({ limit: 50 });
+      expect(result.photos[0].youtubeVideoId).toBe("yt-abc-123");
+    });
+
+    it("returns undefined youtubeVideoId for photo documents", async () => {
+      const fakeDocs = [
+        {
+          id: "IMG1",
+          data: () => ({
+            taken_at: { toDate: () => new Date("2023-07-15") },
+            preview_gcs_path: "previews/IMG1.webp",
+            original_gcs_path: "originals/IMG1.jpg",
+            width: 1280,
+            height: 960,
+          }),
+        },
+      ];
+      mockDb.get.mockResolvedValue({ docs: fakeDocs });
+
+      const result = await repo.list({ limit: 50 });
+      expect(result.photos[0].youtubeVideoId).toBeUndefined();
+    });
   });
 });

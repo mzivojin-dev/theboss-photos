@@ -6,9 +6,10 @@ import Lightbox from "./Lightbox";
 interface Photo {
   id: string;
   takenAt: string;
-  previewUrl: string;
-  width: number;
-  height: number;
+  previewUrl: string | null;
+  youtubeVideoId?: string;
+  width: number | null;
+  height: number | null;
 }
 
 export default function Timeline() {
@@ -65,14 +66,28 @@ export default function Timeline() {
           <div
             key={photo.id}
             onClick={() => setLightboxIndex(idx)}
-            style={{ cursor: "pointer", aspectRatio: `${photo.width}/${photo.height}`, overflow: "hidden", background: "#2a2a2a" }}
+            style={{
+              cursor: "pointer",
+              aspectRatio: photo.width && photo.height ? `${photo.width}/${photo.height}` : "16/9",
+              overflow: "hidden",
+              background: "#2a2a2a",
+            }}
           >
-            <img
-              src={photo.previewUrl}
-              alt=""
-              loading="lazy"
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            />
+            {photo.youtubeVideoId ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${photo.youtubeVideoId}`}
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+                style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+              />
+            ) : (
+              <img
+                src={photo.previewUrl ?? ""}
+                alt=""
+                loading="lazy"
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+            )}
           </div>
         ))}
       </div>

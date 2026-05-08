@@ -4,12 +4,15 @@ Ingestion Job entry point.
 Reads Takeout Archive ZIPs from the configured Google Drive folder,
 extracts photos via byte-range requests, generates Preview Images,
 and writes Previews + Originals to GCS and metadata to Firestore.
+Videos are uploaded to YouTube as private and stored by youtube_video_id.
 """
 import os
 import logging
+import tempfile
 from io import BytesIO
 
 import requests
+from PIL import Image
 from google.auth import default as google_auth_default
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage, firestore
@@ -19,6 +22,7 @@ from .drive_zip_streamer import DriveZipStreamer
 from .image_processor import process as generate_preview
 from .sidecar_parser import parse as parse_sidecar
 from .photo_index_repository import PhotoIndexRepository, PhotoDoc
+from .youtube_uploader import YouTubeUploader, SecretManagerAuth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -27,6 +31,7 @@ PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 PREVIEWS_BUCKET = os.environ["PREVIEWS_BUCKET"]
 ORIGINALS_BUCKET = os.environ["ORIGINALS_BUCKET"]
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+YOUTUBE_REFRESH_TOKEN_SECRET = os.environ["YOUTUBE_REFRESH_TOKEN_SECRET"]
 
 
 def run() -> None:
@@ -43,6 +48,11 @@ def run() -> None:
 
     previews_bucket = gcs.bucket(PREVIEWS_BUCKET)
     originals_bucket = gcs.bucket(ORIGINALS_BUCKET)
+
+    uploader = YouTubeUploader(SecretManagerAuth(
+        secret_name=YOUTUBE_REFRESH_TOKEN_SECRET,
+        project_id=PROJECT_ID,
+    ))
 
     # List all ZIP files in the Drive folder
     results = drive.files().list(
@@ -102,16 +112,21 @@ def run() -> None:
             filename = entry.name.split("/")[-1]
             base_name = metadata.google_photos_id
 
-            # Upload Original
             original_path = f"{base_name}_{filename}"
             if entry.is_video:
-                content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/quicktime"
-                originals_bucket.blob(original_path).upload_from_string(raw_bytes, content_type=content_type)
+                suffix = os.path.splitext(filename)[1] or ".mp4"
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    tmp.write(raw_bytes)
+                    tmp_path = tmp.name
+                try:
+                    video_id = uploader.upload(tmp_path, taken_at=metadata.taken_at)
+                finally:
+                    os.unlink(tmp_path)
                 repo.upsert(PhotoDoc(
                     google_photos_id=metadata.google_photos_id,
                     filename=filename,
                     taken_at=metadata.taken_at,
-                    original_gcs_path=original_path,
+                    youtube_video_id=video_id,
                     latitude=metadata.latitude,
                     longitude=metadata.longitude,
                     media_type="video",
@@ -126,9 +141,7 @@ def run() -> None:
                 originals_bucket.blob(original_path).upload_from_string(
                     raw_bytes, content_type="image/jpeg"
                 )
-                from PIL import Image
-                from io import BytesIO as _BytesIO
-                img = Image.open(_BytesIO(preview_bytes))
+                img = Image.open(BytesIO(preview_bytes))
                 width, height = img.size
                 repo.upsert(PhotoDoc(
                     google_photos_id=metadata.google_photos_id,
