@@ -25,7 +25,7 @@ Google Drive folder
 
 - GCP project with billing enabled
 - `gcloud` CLI authenticated (`gcloud auth login`)
-- Terraform ≥ 1.5
+- x ≥ 1.5
 - Docker (for building container images)
 - Node.js 20+ and Python 3.11+
 
