@@ -12,7 +12,6 @@ import sys
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import BytesIO
 from urllib.parse import urlparse
 
 from google.auth import default as google_auth_default
@@ -20,10 +19,10 @@ from google.auth.transport.requests import AuthorizedSession, Request as GoogleA
 from google.cloud import storage, firestore
 from googleapiclient.discovery import build
 
-from .drive_zip_streamer import DriveZipStreamer, ZipEntry
-from .image_processor import process as generate_preview
-from .sidecar_parser import PhotoMetadata
-from .photo_index_repository import PhotoIndexRepository, PhotoDoc
+from .drive_zip_streamer import DriveZipStreamer
+from .gcs_blob_store import GcsBlobStore
+from .media_indexer import MediaIndexer
+from .photo_index_repository import PhotoIndexRepository
 from .takeout_ingestion import TakeoutArchive, ingest_archives
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -136,10 +135,11 @@ def run() -> None:
     drive = build("drive", "v3", credentials=credentials)
     gcs = storage.Client(project=PROJECT_ID)
     db = firestore.Client(project=PROJECT_ID, database="photo-lib")
-    repo = PhotoIndexRepository(db=db)
-
-    previews_bucket = gcs.bucket(PREVIEWS_BUCKET)
-    originals_bucket = gcs.bucket(ORIGINALS_BUCKET)
+    indexer = MediaIndexer(
+        originals=GcsBlobStore(gcs.bucket(ORIGINALS_BUCKET)),
+        previews=GcsBlobStore(gcs.bucket(PREVIEWS_BUCKET)),
+        photo_index=PhotoIndexRepository(db=db),
+    )
 
     # List all ZIP files in the Drive folder
     results = drive.files().list(
@@ -154,58 +154,6 @@ def run() -> None:
 
     # Refreshes the token on expiry; a run downloading many GB can outlast the one-hour token.
     auth_session = AuthorizedSession(credentials)
-
-    def index_media(entry: ZipEntry, metadata: PhotoMetadata) -> None:
-        if repo.exists(metadata.google_photos_id):
-            log.debug("Already indexed: %s — skipping", metadata.google_photos_id)
-            return
-
-        raw_bytes = entry.read()
-        filename = entry.name.split("/")[-1]
-        base_name = metadata.google_photos_id
-
-        # Upload Original
-        original_path = f"{base_name}_{filename}"
-        if entry.is_video:
-            content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/quicktime"
-            originals_bucket.blob(original_path).upload_from_string(raw_bytes, content_type=content_type)
-            repo.upsert(PhotoDoc(
-                google_photos_id=metadata.google_photos_id,
-                filename=filename,
-                taken_at=metadata.taken_at,
-                original_gcs_path=original_path,
-                latitude=metadata.latitude,
-                longitude=metadata.longitude,
-                media_type="video",
-            ))
-        else:
-            # Generate and upload Preview
-            preview_bytes = generate_preview(raw_bytes)
-            preview_path = f"{base_name}.webp"
-            previews_bucket.blob(preview_path).upload_from_string(
-                preview_bytes, content_type="image/webp"
-            )
-            originals_bucket.blob(original_path).upload_from_string(
-                raw_bytes, content_type="image/jpeg"
-            )
-            from PIL import Image
-            from io import BytesIO as _BytesIO
-            img = Image.open(_BytesIO(preview_bytes))
-            width, height = img.size
-            repo.upsert(PhotoDoc(
-                google_photos_id=metadata.google_photos_id,
-                filename=filename,
-                taken_at=metadata.taken_at,
-                original_gcs_path=original_path,
-                latitude=metadata.latitude,
-                longitude=metadata.longitude,
-                media_type="photo",
-                preview_gcs_path=preview_path,
-                width=width,
-                height=height,
-            ))
-
-        log.info("Indexed: %s", filename)
 
     def archive_fully_ingested(archive: TakeoutArchive) -> None:
         if DELETE_PROCESSED_DRIVE_FILES:
@@ -222,7 +170,7 @@ def run() -> None:
         )
         for zip_file in zip_files
     ]
-    ingest_archives(archives, index_media, archive_fully_ingested)
+    ingest_archives(archives, indexer.index, archive_fully_ingested)
 
     log.info("Ingestion complete.")
 
