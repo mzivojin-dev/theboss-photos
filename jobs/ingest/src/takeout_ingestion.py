@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from .drive_zip_streamer import DriveZipStreamer, ZipEntry, find_matching_sidecar
-from .media_indexer import IndexResult, Outcome
+from .index_outcome import IndexResult, Outcome
 from .sidecar_parser import PhotoMetadata, parse as parse_sidecar
 
 log = logging.getLogger(__name__)
@@ -96,6 +96,7 @@ def ingest_archives(
     for archive in archives:
         log.info("Processing archive: %s (%s)", archive.name, archive.file_id)
         no_sidecar = 0
+        bad_sidecar = 0
         matched: list[tuple[ZipEntry, PhotoMetadata]] = []
 
         for entry in archive.streamer.list_entries():
@@ -113,7 +114,7 @@ def ingest_archives(
                 metadata = parse_sidecar(sidecar_bytes)
             except ValueError as e:
                 log.warning("Sidecar parse error for %s: %s — skipping", entry.name, e)
-                no_sidecar += 1
+                bad_sidecar += 1
                 continue
 
             matched.append((entry, metadata))
@@ -138,13 +139,13 @@ def ingest_archives(
             )
         counts = {outcome: sum(result.outcome is outcome for result in results) for outcome in Outcome}
 
-        # Keep an archive with unmatched or failed media so deleting it can't lose those files.
-        keep = no_sidecar or counts[Outcome.FAILED]
+        # Keep an archive with unmatched, unparseable or failed media so deleting it can't lose those files.
+        keep = no_sidecar or bad_sidecar or counts[Outcome.FAILED]
         log.log(
             logging.WARNING if keep else logging.INFO,
-            "%s: %d indexed, %d already indexed, %d no Sidecar, %d failed — %s",
+            "%s: %d indexed, %d already indexed, %d no Sidecar, %d bad Sidecar, %d failed — %s",
             archive.name, counts[Outcome.INDEXED], counts[Outcome.ALREADY_INDEXED], no_sidecar,
-            counts[Outcome.FAILED], "kept" if keep else "fully ingested",
+            bad_sidecar, counts[Outcome.FAILED], "kept" if keep else "fully ingested",
         )
         if not keep:
             archive_fully_ingested(archive)

@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 import pytest
 from PIL import Image
 
-from src.media_indexer import MediaIndexer, Outcome
+from src.index_outcome import Outcome
+from src.media_indexer import MediaIndexer
 from src.photo_index_repository import PhotoDoc
 from src.sidecar_parser import PhotoMetadata
 from tests.in_memory_adapters import InMemoryBlobStore, InMemoryPhotoIndex
