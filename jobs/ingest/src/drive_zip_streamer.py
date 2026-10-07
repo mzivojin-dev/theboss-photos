@@ -1,8 +1,27 @@
 import io
+import logging
 import struct
 import zipfile
 from dataclasses import dataclass
 from typing import Iterator
+
+log = logging.getLogger(__name__)
+
+
+def find_matching_sidecar(media_name: str, sidecars: dict[str, bytes]) -> bytes | None:
+    """Return the sidecar bytes for a media file, matching case-insensitively.
+
+    Google Takeout sidecars are named like <filename>.jpg.json or <filename>.mp4.json;
+    identical media names may also appear with a duplicate suffix such as (1). We match
+    against the canonical basename rather than raw path strings so videos with uppercase
+    extensions and other casing differences still resolve correctly.
+    """
+    media_basename = media_name.rsplit("/", 1)[-1].lower()
+    for sidecar_name, sidecar_bytes in sidecars.items():
+        sidecar_basename = sidecar_name.rsplit("/", 1)[-1].lower()
+        if sidecar_basename.endswith(".json") and sidecar_basename.startswith(media_basename):
+            return sidecar_bytes
+    return None
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".wmv"}
@@ -76,8 +95,12 @@ class DriveZipStreamer:
         return eocd_offset, tail[pos:]
 
     def list_entries(self) -> Iterator[ZipEntry]:
-        file_size = self._get_file_size()
-        eocd_offset, eocd_data = self._find_eocd(file_size)
+        try:
+            file_size = self._get_file_size()
+            eocd_offset, eocd_data = self._find_eocd(file_size)
+        except ValueError as e:
+            log.error("Failed to read ZIP file %s: %s", self._file_id, e)
+            return
 
         # Parse EOCD: offset 16 = CD offset, offset 12 = CD size
         cd_size = struct.unpack_from("<I", eocd_data, 12)[0]
