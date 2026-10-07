@@ -1,8 +1,30 @@
 import io
+import logging
 import struct
+import time
 import zipfile
 from dataclasses import dataclass
 from typing import Iterator
+
+import requests
+
+log = logging.getLogger(__name__)
+
+
+def find_matching_sidecar(media_name: str, sidecars: dict[str, bytes]) -> bytes | None:
+    """Return the sidecar bytes for a media file, matching case-insensitively.
+
+    Google Takeout sidecars are named like <filename>.jpg.json or <filename>.mp4.json;
+    identical media names may also appear with a duplicate suffix such as (1). We match
+    against the canonical basename rather than raw path strings so videos with uppercase
+    extensions and other casing differences still resolve correctly.
+    """
+    media_basename = media_name.rsplit("/", 1)[-1].lower()
+    for sidecar_name, sidecar_bytes in sidecars.items():
+        sidecar_basename = sidecar_name.rsplit("/", 1)[-1].lower()
+        if sidecar_basename.endswith(".json") and sidecar_basename.startswith(media_basename):
+            return sidecar_bytes
+    return None
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".wmv"}
@@ -11,6 +33,11 @@ SIDECAR_EXTENSIONS = {".json"}
 # Minimum size of End of Central Directory record
 EOCD_SIZE = 22
 EOCD_SIGNATURE = b"PK\x05\x06"
+
+# Drive drops or stalls the occasional connection over a run of thousands of range requests.
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_REQUEST_ATTEMPTS = 5
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -25,6 +52,11 @@ class ZipEntry:
     @property
     def _ext(self) -> str:
         return ("." + self.name.rsplit(".", 1)[-1].lower()) if "." in self.name else ""
+
+    @property
+    def size(self) -> int:
+        """Uncompressed size in bytes."""
+        return self._file_size
 
     @property
     def is_image(self) -> bool:
@@ -51,7 +83,7 @@ class DriveZipStreamer:
 
     def _get_file_size(self) -> int:
         if self._file_size is None:
-            resp = self._http.get(self._download_url, headers={"Range": "bytes=0-0"})
+            resp = self._get({"Range": "bytes=0-0"})
             cr = resp.headers.get("Content-Range", "")
             if "/" in cr:
                 self._file_size = int(cr.split("/")[-1])
@@ -60,9 +92,24 @@ class DriveZipStreamer:
                 self._file_size = int(resp.headers["Content-Length"])
         return self._file_size
 
+    def _get(self, headers: dict[str, str]):
+        for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+            try:
+                resp = self._http.get(self._download_url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+                if resp.status_code not in RETRYABLE_STATUS_CODES:
+                    resp.raise_for_status()
+                    return resp
+                error: Exception = requests.HTTPError(f"HTTP {resp.status_code}")
+            except (requests.ConnectionError, requests.Timeout) as e:
+                error = e
+            if attempt == MAX_REQUEST_ATTEMPTS:
+                raise error
+            log.warning("Drive request for %s failed (%s), retry %d/%d",
+                        self._file_id, error, attempt, MAX_REQUEST_ATTEMPTS - 1)
+            time.sleep(2 ** attempt)
+
     def _range_read(self, start: int, end: int) -> bytes:
-        resp = self._http.get(self._download_url, headers={"Range": f"bytes={start}-{end}"})
-        return resp.content
+        return self._get({"Range": f"bytes={start}-{end}"}).content
 
     def _find_eocd(self, file_size: int) -> tuple[int, bytes]:
         # Read last 64KB to handle ZIP comments
@@ -76,8 +123,12 @@ class DriveZipStreamer:
         return eocd_offset, tail[pos:]
 
     def list_entries(self) -> Iterator[ZipEntry]:
-        file_size = self._get_file_size()
-        eocd_offset, eocd_data = self._find_eocd(file_size)
+        try:
+            file_size = self._get_file_size()
+            eocd_offset, eocd_data = self._find_eocd(file_size)
+        except ValueError as e:
+            log.error("Failed to read ZIP file %s: %s", self._file_id, e)
+            return
 
         # Parse EOCD: offset 16 = CD offset, offset 12 = CD size
         cd_size = struct.unpack_from("<I", eocd_data, 12)[0]
