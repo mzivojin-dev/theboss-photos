@@ -1,0 +1,56 @@
+services:
+  app:
+    build:
+      context: ./app
+    ports:
+      - "3000:3000"
+    environment:
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in .env}
+      PREVIEWS_BUCKET: ${PREVIEWS_BUCKET:?Set PREVIEWS_BUCKET in .env}
+      ORIGINALS_BUCKET: ${ORIGINALS_BUCKET:?Set ORIGINALS_BUCKET in .env}
+      INGEST_JOB_NAME: ${INGEST_JOB_NAME:-theboss-photos-ingest}
+      GCP_REGION: ${GCP_REGION:-us-central1}
+      INGEST_TRIGGER_MODE: local
+      INGEST_SERVICE_URL: http://ingest:8080
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/application_default_credentials.json
+    volumes:
+      - type: bind
+        source: "${APPDATA}/gcloud/application_default_credentials.json"
+        target: /var/secrets/google/application_default_credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      ingest:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest:
+    build:
+      context: ./jobs/ingest
+    command: ["python", "-m", "src.main", "--server"]
+    environment:
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in .env}
+      PREVIEWS_BUCKET: ${PREVIEWS_BUCKET:?Set PREVIEWS_BUCKET in .env}
+      ORIGINALS_BUCKET: ${ORIGINALS_BUCKET:?Set ORIGINALS_BUCKET in .env}
+      DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:?Set DRIVE_FOLDER_ID in .env}
+      DELETE_PROCESSED_DRIVE_FILES: "false"
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/application_default_credentials.json
+    volumes:
+      - type: bind
+        source: "${APPDATA}/gcloud/application_default_credentials.json"
+        target: /var/secrets/google/application_default_credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/status', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped

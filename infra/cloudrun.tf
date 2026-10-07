@@ -1,8 +1,10 @@
 resource "google_cloud_run_v2_service" "app" {
   name     = "theboss-photos"
   location = var.region
+  labels   = local.cost_labels
 
   template {
+    labels          = local.cost_labels
     service_account = google_service_account.app.email
 
     containers {
@@ -28,6 +30,10 @@ resource "google_cloud_run_v2_service" "app" {
         name  = "GCP_REGION"
         value = var.region
       }
+      env {
+        name  = "INGEST_TRIGGER_MODE"
+        value = "cloud"
+      }
 
       resources {
         limits = {
@@ -42,8 +48,11 @@ resource "google_cloud_run_v2_service" "app" {
 resource "google_cloud_run_v2_job" "ingest" {
   name     = "theboss-photos-ingest"
   location = var.region
+  labels   = local.cost_labels
 
   template {
+    labels = local.cost_labels
+
     template {
       service_account = google_service_account.app.email
       timeout         = "86400s" # 24 hours

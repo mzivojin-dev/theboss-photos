@@ -18,3 +18,12 @@ provider "google" {
   project = var.project_id
   region  = var.region
 }
+
+locals {
+  cost_labels = {
+    application = "theboss-photos"
+    environment = var.environment
+    cost_center = var.cost_center
+    managed_by  = "terraform"
+  }
+}

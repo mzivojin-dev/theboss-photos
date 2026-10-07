@@ -4,6 +4,7 @@ resource "google_storage_bucket" "previews" {
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
   force_destroy               = false
+  labels                      = local.cost_labels
 
   lifecycle_rule {
     condition { age = 0 }
@@ -17,4 +18,5 @@ resource "google_storage_bucket" "originals" {
   storage_class               = "ARCHIVE"
   uniform_bucket_level_access = true
   force_destroy               = false
+  labels                      = local.cost_labels
 }

@@ -9,6 +9,21 @@ type Status = "RUNNING" | "SUCCEEDED" | "FAILED" | "IDLE";
 
 export async function GET() {
   try {
+    const triggerMode = process.env.INGEST_TRIGGER_MODE ?? "cloud";
+    if (triggerMode === "local") {
+      const serviceUrl = process.env.INGEST_SERVICE_URL;
+      if (!serviceUrl) {
+        throw new Error("INGEST_SERVICE_URL is required when INGEST_TRIGGER_MODE=local");
+      }
+
+      const response = await fetch(`${serviceUrl}/status`);
+      const body = await response.json();
+      return NextResponse.json(body, { status: response.status });
+    }
+    if (triggerMode !== "cloud") {
+      throw new Error(`Unsupported INGEST_TRIGGER_MODE: ${triggerMode}`);
+    }
+
     const auth = new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
     });

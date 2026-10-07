@@ -37,4 +37,10 @@ Thumbs.db
 
 # IDE
 .vscode/
+!.vscode/
+.vscode/*
+!.vscode/launch.json
 .idea/
+
+# Local Google Takeout data
+takeout/
