@@ -84,3 +84,19 @@ def test_output_size_under_300kb_for_typical_photo():
 def test_reports_the_preview_dimensions():
     preview = process(_make_jpeg(3000, 2000))
     assert (preview.width, preview.height) == (1280, 853)
+
+
+def _make_jpeg_with_orientation(width: int, height: int, orientation: int) -> bytes:
+    img = Image.new("RGB", (width, height), color=(100, 149, 237))
+    exif = Image.Exif()
+    exif[0x0112] = orientation  # EXIF Orientation
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
+def test_rotated_phone_photo_preview_is_upright():
+    # Phones store portrait photos as landscape pixels plus "rotate 90° CW to display" (Orientation 6).
+    preview = process(_make_jpeg_with_orientation(3000, 2000, orientation=6))
+    assert (preview.width, preview.height) == (853, 1280)
+    assert Image.open(io.BytesIO(preview.data)).size == (853, 1280)

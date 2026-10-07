@@ -1,7 +1,7 @@
 import io
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 try:
     from pillow_heif import register_heif_opener
@@ -21,7 +21,9 @@ class Preview:
 
 
 def process(raw_bytes: bytes) -> Preview:
-    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    # Phones store rotated photos as unrotated pixels plus an EXIF Orientation tag;
+    # apply it, since the WebP Preview carries no EXIF.
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw_bytes))).convert("RGB")
 
     long_side = max(img.width, img.height)
     if long_side > MAX_SIDE:
