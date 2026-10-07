@@ -13,22 +13,6 @@ from .media_types import IMAGE_EXTENSIONS, SIDECAR_EXTENSIONS, VIDEO_EXTENSIONS,
 log = logging.getLogger(__name__)
 
 
-def find_matching_sidecar(media_name: str, sidecars: dict[str, bytes]) -> bytes | None:
-    """Return the sidecar bytes for a media file, matching case-insensitively.
-
-    Google Takeout sidecars are named like <filename>.jpg.json or <filename>.mp4.json;
-    identical media names may also appear with a duplicate suffix such as (1). We match
-    against the canonical basename rather than raw path strings so videos with uppercase
-    extensions and other casing differences still resolve correctly.
-    """
-    media_basename = media_name.rsplit("/", 1)[-1].lower()
-    for sidecar_name, sidecar_bytes in sidecars.items():
-        sidecar_basename = sidecar_name.rsplit("/", 1)[-1].lower()
-        if sidecar_basename.endswith(".json") and sidecar_basename.startswith(media_basename):
-            return sidecar_bytes
-    return None
-
-
 # Minimum size of End of Central Directory record
 EOCD_SIZE = 22
 EOCD_SIGNATURE = b"PK\x05\x06"

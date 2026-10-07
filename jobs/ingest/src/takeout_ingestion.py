@@ -8,8 +8,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
-from .drive_zip_streamer import DriveZipStreamer, ZipEntry, find_matching_sidecar
+from .drive_zip_streamer import DriveZipStreamer, ZipEntry
 from .index_outcome import IndexResult, Outcome
+from .sidecar_index import SidecarIndex
 from .sidecar_parser import PhotoMetadata, parse as parse_sidecar
 
 log = logging.getLogger(__name__)
@@ -86,10 +87,10 @@ def ingest_archives(
     ]
     log.info("Reading %d sidecars from %d archive(s)", len(sidecar_entries), len(archives))
     with ThreadPoolExecutor(SIDECAR_READ_WORKERS) as pool:
-        sidecars = dict(zip(
+        sidecars = SidecarIndex(dict(zip(
             (entry.name for entry in sidecar_entries),
             pool.map(lambda entry: entry.read(), sidecar_entries),
-        ))
+        )))
 
     failure_streak = _FailureStreak(MAX_CONSECUTIVE_FAILURES)
 
@@ -103,8 +104,7 @@ def ingest_archives(
             if not entry.is_image and not entry.is_video:
                 continue
 
-            # Match sidecar by canonical filename, ignoring case and duplicate suffixes.
-            sidecar_bytes = find_matching_sidecar(entry.name.split("/")[-1], sidecars)
+            sidecar_bytes = sidecars.find(entry.name)
             if sidecar_bytes is None:
                 log.warning("No sidecar for %s — skipping", entry.name)
                 no_sidecar += 1

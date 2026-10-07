@@ -9,7 +9,7 @@ import zipfile
 import pytest
 import requests
 from unittest.mock import MagicMock, patch
-from src.drive_zip_streamer import DriveZipStreamer, ZipEntry, find_matching_sidecar
+from src.drive_zip_streamer import DriveZipStreamer, ZipEntry
 
 
 def _build_zip(files: dict[str, bytes]) -> bytes:
@@ -111,16 +111,6 @@ def test_does_not_read_full_zip_upfront(fake_zip):
     streamer = DriveZipStreamer(http_client=mock_http, file_id="fake-file-id")
     list(streamer.list_entries())
     assert len(full_reads) == 0, "Should not have issued a full-file GET"
-
-
-def test_find_matching_sidecar_is_case_insensitive_for_video_files():
-    sidecars = {"Photos/2024/VID_0001.MOV.json": b"sidecar-json"}
-    assert find_matching_sidecar("Photos/2024/VID_0001.mov", sidecars) == b"sidecar-json"
-
-
-def test_find_matching_sidecar_handles_duplicate_suffixes():
-    sidecars = {"Photos/2024/IMG_0001.jpg(1).json": b"sidecar-json"}
-    assert find_matching_sidecar("Photos/2024/IMG_0001.jpg", sidecars) == b"sidecar-json"
 
 
 def _flaky_streamer(zip_bytes: bytes, failures: list) -> DriveZipStreamer:
