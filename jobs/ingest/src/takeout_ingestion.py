@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from .drive_zip_streamer import DriveZipStreamer, ZipEntry, find_matching_sidecar
+from .media_indexer import IndexResult, Outcome
 from .sidecar_parser import PhotoMetadata, parse as parse_sidecar
 
 log = logging.getLogger(__name__)
@@ -22,6 +23,28 @@ SIDECAR_READ_WORKERS = 8
 # files in flight is capped: photos run in parallel, large videos effectively one at a time.
 MEDIA_WORKERS = 6
 MEDIA_BYTES_IN_FLIGHT = 512 * 1024 * 1024
+
+# A run of failures this long means a systemic problem (expired credentials, a missing
+# bucket, Firestore permissions) rather than a bad file, so the run stops.
+MAX_CONSECUTIVE_FAILURES = 10
+
+
+class _FailureStreak:
+    def __init__(self, limit: int):
+        self._limit = limit
+        self._count = 0
+        self._lock = threading.Lock()
+
+    def record(self, result: IndexResult) -> None:
+        with self._lock:
+            if self._count >= self._limit:
+                return  # once tripped, stays tripped: a success still in flight can't cancel the abort
+            self._count = self._count + 1 if result.outcome is Outcome.FAILED else 0
+
+    @property
+    def tripped(self) -> bool:
+        with self._lock:
+            return self._count >= self._limit
 
 
 class _ByteBudget:
@@ -53,7 +76,7 @@ class TakeoutArchive:
 
 def ingest_archives(
     archives: list[TakeoutArchive],
-    index_media: Callable[[ZipEntry, PhotoMetadata], None],
+    index_media: Callable[[ZipEntry, PhotoMetadata], IndexResult],
     archive_fully_ingested: Callable[[TakeoutArchive], None],
 ) -> None:
     # Takeout splits an export across archives, and a media file's Sidecar is often in a
@@ -68,9 +91,11 @@ def ingest_archives(
             pool.map(lambda entry: entry.read(), sidecar_entries),
         ))
 
+    failure_streak = _FailureStreak(MAX_CONSECUTIVE_FAILURES)
+
     for archive in archives:
         log.info("Processing archive: %s (%s)", archive.name, archive.file_id)
-        skipped = 0
+        no_sidecar = 0
         matched: list[tuple[ZipEntry, PhotoMetadata]] = []
 
         for entry in archive.streamer.list_entries():
@@ -81,30 +106,45 @@ def ingest_archives(
             sidecar_bytes = find_matching_sidecar(entry.name.split("/")[-1], sidecars)
             if sidecar_bytes is None:
                 log.warning("No sidecar for %s — skipping", entry.name)
-                skipped += 1
+                no_sidecar += 1
                 continue
 
             try:
                 metadata = parse_sidecar(sidecar_bytes)
             except ValueError as e:
                 log.warning("Sidecar parse error for %s: %s — skipping", entry.name, e)
-                skipped += 1
+                no_sidecar += 1
                 continue
 
             matched.append((entry, metadata))
 
         budget = _ByteBudget(MEDIA_BYTES_IN_FLIGHT)
 
-        def index_within_budget(item: tuple[ZipEntry, PhotoMetadata]) -> None:
+        def index_within_budget(item: tuple[ZipEntry, PhotoMetadata]) -> IndexResult | None:
             entry, metadata = item
             with budget.hold(entry.size):
-                index_media(entry, metadata)
+                if failure_streak.tripped:
+                    return None  # the run is aborting; don't start more work
+                result = index_media(entry, metadata)
+            failure_streak.record(result)
+            return result
 
         with ThreadPoolExecutor(MEDIA_WORKERS) as pool:
-            list(pool.map(index_within_budget, matched))  # list() re-raises the first failure
+            results = list(pool.map(index_within_budget, matched))
+        if failure_streak.tripped:
+            raise RuntimeError(
+                f"Aborting ingestion: {MAX_CONSECUTIVE_FAILURES} media files in a row failed to index "
+                "(see the warnings above); this looks like a systemic problem such as credentials or permissions"
+            )
+        counts = {outcome: sum(result.outcome is outcome for result in results) for outcome in Outcome}
 
-        # Keep an archive with skipped media so deleting it can't lose those files.
-        if skipped:
-            log.warning("Keeping archive %s: %d media file(s) skipped", archive.name, skipped)
-        else:
+        # Keep an archive with unmatched or failed media so deleting it can't lose those files.
+        keep = no_sidecar or counts[Outcome.FAILED]
+        log.log(
+            logging.WARNING if keep else logging.INFO,
+            "%s: %d indexed, %d already indexed, %d no Sidecar, %d failed — %s",
+            archive.name, counts[Outcome.INDEXED], counts[Outcome.ALREADY_INDEXED], no_sidecar,
+            counts[Outcome.FAILED], "kept" if keep else "fully ingested",
+        )
+        if not keep:
             archive_fully_ingested(archive)

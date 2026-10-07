@@ -25,13 +25,8 @@ class PhotoIndexRepository:
         self._db = db
 
     def exists(self, google_photos_id: str) -> bool:
-        results = (
-            self._db.collection(self.COLLECTION)
-            .where("google_photos_id", "==", google_photos_id)
-            .limit(1)
-            .get()
-        )
-        return len(results) > 0
+        # The document ID is the google_photos_id (see upsert), so a direct lookup suffices.
+        return self._db.collection(self.COLLECTION).document(google_photos_id).get().exists
 
     def upsert(self, doc: PhotoDoc) -> None:
         data = {

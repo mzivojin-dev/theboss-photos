@@ -1,4 +1,6 @@
 import io
+from dataclasses import dataclass
+
 from PIL import Image
 
 try:
@@ -11,7 +13,14 @@ MAX_SIDE = 1280
 WEBP_QUALITY = 85
 
 
-def process(raw_bytes: bytes) -> bytes:
+@dataclass
+class Preview:
+    data: bytes  # WebP
+    width: int
+    height: int
+
+
+def process(raw_bytes: bytes) -> Preview:
     img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
 
     long_side = max(img.width, img.height)
@@ -23,4 +32,4 @@ def process(raw_bytes: bytes) -> bytes:
 
     buf = io.BytesIO()
     img.save(buf, format="WEBP", quality=WEBP_QUALITY, method=4)
-    return buf.getvalue()
+    return Preview(data=buf.getvalue(), width=img.width, height=img.height)
