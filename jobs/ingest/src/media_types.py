@@ -1,9 +1,9 @@
 """
-The media file extensions the Ingestion Job accepts, and their content types.
+The file extensions the Ingestion Job accepts, and the content types of media.
 """
-import mimetypes
+import posixpath
 
-# mimetypes alone is platform-dependent (it reads the OS registry on Windows) and lacks some of these.
+# Not mimetypes: it is platform-dependent (it reads the OS registry on Windows) and lacks some of these.
 IMAGE_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -28,11 +28,12 @@ VIDEO_CONTENT_TYPES = {
 
 IMAGE_EXTENSIONS = frozenset(IMAGE_CONTENT_TYPES)
 VIDEO_EXTENSIONS = frozenset(VIDEO_CONTENT_TYPES)
+SIDECAR_EXTENSIONS = frozenset({".json"})
 
 
 def extension_of(filename: str) -> str:
     """The lowercased extension, with its dot, or "" if there is none."""
-    return ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+    return posixpath.splitext(posixpath.basename(filename))[1].lower()
 
 
 def content_type_for(filename: str) -> str:
@@ -40,6 +41,5 @@ def content_type_for(filename: str) -> str:
     return (
         IMAGE_CONTENT_TYPES.get(extension)
         or VIDEO_CONTENT_TYPES.get(extension)
-        or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )

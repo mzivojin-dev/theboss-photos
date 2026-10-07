@@ -71,6 +71,22 @@ def test_parse_raises_on_missing_url():
         parse(json.dumps(base).encode())
 
 
+@pytest.mark.parametrize("json_bytes", [
+    b"not json",
+    b"123",
+    b"[]",
+    _sidecar(url=123),
+    _sidecar(photoTakenTime={}),
+    _sidecar(photoTakenTime="2020"),
+    _sidecar(photoTakenTime={"timestamp": "soon"}),
+    _sidecar(photoTakenTime={"timestamp": str(10**20)}),
+    _sidecar(geoData=[1], geoDataExif=None),
+])
+def test_parse_raises_value_error_on_a_malformed_sidecar(json_bytes):
+    with pytest.raises(ValueError):
+        parse(json_bytes)
+
+
 def test_parse_raises_on_missing_photo_taken_time():
     base = json.loads(_sidecar())
     del base["photoTakenTime"]

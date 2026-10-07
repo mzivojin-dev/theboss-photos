@@ -7,6 +7,7 @@ file's Sidecar is often in a different archive than the media itself.
 import json
 import subprocess
 import sys
+from pathlib import Path
 import threading
 import time
 
@@ -259,7 +260,7 @@ def test_ingestion_does_not_load_the_imaging_stack():
     # In a fresh interpreter, so modules other tests imported don't count.
     loaded = subprocess.run(
         [sys.executable, "-c", "import sys, src.takeout_ingestion; print(sorted(sys.modules))"],
-        capture_output=True, text=True, check=True,
+        cwd=Path(__file__).parent.parent, capture_output=True, text=True, check=True,
     ).stdout
     assert "'PIL'" not in loaded
     assert "'pillow_heif'" not in loaded

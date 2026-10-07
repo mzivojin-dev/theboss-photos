@@ -13,7 +13,17 @@ class PhotoMetadata:
 
 
 def parse(json_bytes: bytes) -> PhotoMetadata:
+    """Raises ValueError for any Sidecar that isn't valid JSON of the expected shape."""
+    try:
+        return _parse(json_bytes)
+    except (TypeError, KeyError, AttributeError, OverflowError, OSError) as error:
+        raise ValueError(f"Malformed Sidecar: {type(error).__name__}: {error}") from error
+
+
+def _parse(json_bytes: bytes) -> PhotoMetadata:
     data = json.loads(json_bytes)
+    if not isinstance(data, dict):
+        raise ValueError("Sidecar is not a JSON object")
 
     if "url" not in data:
         raise ValueError("Sidecar missing required field: url")

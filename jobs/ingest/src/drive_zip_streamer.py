@@ -8,7 +8,7 @@ from typing import Iterator
 
 import requests
 
-from .media_types import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, extension_of
+from .media_types import IMAGE_EXTENSIONS, SIDECAR_EXTENSIONS, VIDEO_EXTENSIONS, extension_of
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,6 @@ def find_matching_sidecar(media_name: str, sidecars: dict[str, bytes]) -> bytes 
             return sidecar_bytes
     return None
 
-SIDECAR_EXTENSIONS = {".json"}
 
 # Minimum size of End of Central Directory record
 EOCD_SIZE = 22
