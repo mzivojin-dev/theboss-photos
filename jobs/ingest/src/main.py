@@ -21,10 +21,11 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage, firestore
 from googleapiclient.discovery import build
 
-from .drive_zip_streamer import DriveZipStreamer, find_matching_sidecar
+from .drive_zip_streamer import DriveZipStreamer, ZipEntry
 from .image_processor import process as generate_preview
-from .sidecar_parser import parse as parse_sidecar
+from .sidecar_parser import PhotoMetadata
 from .photo_index_repository import PhotoIndexRepository, PhotoDoc
+from .takeout_ingestion import TakeoutArchive, ingest_archives
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -155,94 +156,74 @@ def run() -> None:
     auth_session = requests.Session()
     auth_session.headers["Authorization"] = f"Bearer {credentials.token}"
 
-    sidecars: dict[str, bytes] = {}
+    def index_media(entry: ZipEntry, metadata: PhotoMetadata) -> None:
+        if repo.exists(metadata.google_photos_id):
+            log.debug("Already indexed: %s — skipping", metadata.google_photos_id)
+            return
 
-    for zip_file in zip_files:
-        file_id = zip_file["id"]
-        file_name = zip_file["name"]
-        log.info("Processing archive: %s (%s)", file_name, file_id)
+        raw_bytes = entry.read()
+        filename = entry.name.split("/")[-1]
+        base_name = metadata.google_photos_id
 
-        streamer = DriveZipStreamer(http_client=auth_session, file_id=file_id)
-
-        # First pass: collect sidecars
-        for entry in streamer.list_entries():
-            if entry.is_sidecar:
-                sidecars[entry.name] = entry.read()
-
-        # Second pass: process images and videos
-        for entry in streamer.list_entries():
-            if not entry.is_image and not entry.is_video:
-                continue
-
-            # Match sidecar by canonical filename, ignoring case and duplicate suffixes.
-            image_filename = entry.name.split("/")[-1]
-            sidecar_bytes = find_matching_sidecar(image_filename, sidecars)
-            if sidecar_bytes is None:
-                log.warning("No sidecar for %s — skipping", entry.name)
-                continue
-
-            try:
-                metadata = parse_sidecar(sidecar_bytes)
-            except ValueError as e:
-                log.warning("Sidecar parse error for %s: %s — skipping", entry.name, e)
-                continue
-
-            if repo.exists(metadata.google_photos_id):
-                log.debug("Already indexed: %s — skipping", metadata.google_photos_id)
-                continue
-
-            raw_bytes = entry.read()
-            filename = entry.name.split("/")[-1]
-            base_name = metadata.google_photos_id
-
-            # Upload Original
-            original_path = f"{base_name}_{filename}"
-            if entry.is_video:
-                content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/quicktime"
-                originals_bucket.blob(original_path).upload_from_string(raw_bytes, content_type=content_type)
-                repo.upsert(PhotoDoc(
-                    google_photos_id=metadata.google_photos_id,
-                    filename=filename,
-                    taken_at=metadata.taken_at,
-                    original_gcs_path=original_path,
-                    latitude=metadata.latitude,
-                    longitude=metadata.longitude,
-                    media_type="video",
-                ))
-            else:
-                # Generate and upload Preview
-                preview_bytes = generate_preview(raw_bytes)
-                preview_path = f"{base_name}.webp"
-                previews_bucket.blob(preview_path).upload_from_string(
-                    preview_bytes, content_type="image/webp"
-                )
-                originals_bucket.blob(original_path).upload_from_string(
-                    raw_bytes, content_type="image/jpeg"
-                )
-                from PIL import Image
-                from io import BytesIO as _BytesIO
-                img = Image.open(_BytesIO(preview_bytes))
-                width, height = img.size
-                repo.upsert(PhotoDoc(
-                    google_photos_id=metadata.google_photos_id,
-                    filename=filename,
-                    taken_at=metadata.taken_at,
-                    original_gcs_path=original_path,
-                    latitude=metadata.latitude,
-                    longitude=metadata.longitude,
-                    media_type="photo",
-                    preview_gcs_path=preview_path,
-                    width=width,
-                    height=height,
-                ))
-
-            log.info("Indexed: %s", filename)
-
-        if DELETE_PROCESSED_DRIVE_FILES:
-            drive.files().delete(fileId=file_id, supportsAllDrives=True).execute()
-            log.info("Deleted archive from Drive: %s", file_name)
+        # Upload Original
+        original_path = f"{base_name}_{filename}"
+        if entry.is_video:
+            content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/quicktime"
+            originals_bucket.blob(original_path).upload_from_string(raw_bytes, content_type=content_type)
+            repo.upsert(PhotoDoc(
+                google_photos_id=metadata.google_photos_id,
+                filename=filename,
+                taken_at=metadata.taken_at,
+                original_gcs_path=original_path,
+                latitude=metadata.latitude,
+                longitude=metadata.longitude,
+                media_type="video",
+            ))
         else:
-            log.info("Leaving processed archive in Drive: %s", file_name)
+            # Generate and upload Preview
+            preview_bytes = generate_preview(raw_bytes)
+            preview_path = f"{base_name}.webp"
+            previews_bucket.blob(preview_path).upload_from_string(
+                preview_bytes, content_type="image/webp"
+            )
+            originals_bucket.blob(original_path).upload_from_string(
+                raw_bytes, content_type="image/jpeg"
+            )
+            from PIL import Image
+            from io import BytesIO as _BytesIO
+            img = Image.open(_BytesIO(preview_bytes))
+            width, height = img.size
+            repo.upsert(PhotoDoc(
+                google_photos_id=metadata.google_photos_id,
+                filename=filename,
+                taken_at=metadata.taken_at,
+                original_gcs_path=original_path,
+                latitude=metadata.latitude,
+                longitude=metadata.longitude,
+                media_type="photo",
+                preview_gcs_path=preview_path,
+                width=width,
+                height=height,
+            ))
+
+        log.info("Indexed: %s", filename)
+
+    def archive_fully_ingested(archive: TakeoutArchive) -> None:
+        if DELETE_PROCESSED_DRIVE_FILES:
+            drive.files().delete(fileId=archive.file_id, supportsAllDrives=True).execute()
+            log.info("Deleted archive from Drive: %s", archive.name)
+        else:
+            log.info("Leaving processed archive in Drive: %s", archive.name)
+
+    archives = [
+        TakeoutArchive(
+            file_id=zip_file["id"],
+            name=zip_file["name"],
+            streamer=DriveZipStreamer(http_client=auth_session, file_id=zip_file["id"]),
+        )
+        for zip_file in zip_files
+    ]
+    ingest_archives(archives, index_media, archive_fully_ingested)
 
     log.info("Ingestion complete.")
 
