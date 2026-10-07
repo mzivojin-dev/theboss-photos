@@ -1,48 +1,16 @@
 """
 Indexes one media file from a Takeout Archive into Originals, Previews and the Photo Index.
 """
-import enum
 import logging
-import mimetypes
-from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 from .image_processor import process as generate_preview
+from .index_outcome import IndexResult, Outcome
+from .media_types import content_type_for
 from .photo_index_repository import PhotoDoc
 from .sidecar_parser import PhotoMetadata
 
 log = logging.getLogger(__name__)
-
-# The extensions the Ingestion Job accepts. mimetypes alone is platform-dependent
-# (it reads the OS registry on Windows) and lacks some of these.
-CONTENT_TYPES = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-    ".tiff": "image/tiff",
-    ".tif": "image/tiff",
-    ".bmp": "image/bmp",
-    ".mp4": "video/mp4",
-    ".mov": "video/quicktime",
-    ".m4v": "video/x-m4v",
-    ".3gp": "video/3gpp",
-    ".avi": "video/x-msvideo",
-    ".mkv": "video/x-matroska",
-    ".wmv": "video/x-ms-wmv",
-}
-
-
-def content_type_for(filename: str) -> str:
-    extension = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
-    return (
-        CONTENT_TYPES.get(extension)
-        or mimetypes.guess_type(filename)[0]
-        or "application/octet-stream"
-    )
 
 
 class MediaFile(Protocol):
@@ -61,18 +29,6 @@ class PhotoIndex(Protocol):
     def exists(self, google_photos_id: str) -> bool: ...
 
     def upsert(self, doc: PhotoDoc) -> None: ...
-
-
-class Outcome(enum.Enum):
-    INDEXED = "indexed"
-    ALREADY_INDEXED = "already indexed"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True)
-class IndexResult:
-    outcome: Outcome
-    reason: Optional[str] = None
 
 
 class MediaIndexer:

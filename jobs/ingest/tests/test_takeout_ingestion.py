@@ -5,13 +5,15 @@ Google Takeout splits a large export across several Takeout Archives, and a medi
 file's Sidecar is often in a different archive than the media itself.
 """
 import json
+import subprocess
+import sys
 import threading
 import time
 
 import pytest
 
 from src import takeout_ingestion
-from src.media_indexer import IndexResult, Outcome
+from src.index_outcome import IndexResult, Outcome
 from src.takeout_ingestion import TakeoutArchive, ingest_archives
 from tests.test_drive_zip_streamer import _build_zip, _make_streamer
 
@@ -211,6 +213,8 @@ def test_one_summary_line_is_logged_per_archive(caplog):
         **{f"Takeout/Google Photos/{photo_id}.jpg": b"jpeg" for photo_id in outcomes},
         **{f"Takeout/Google Photos/{photo_id}.jpg.supplemental-metadata.json": _sidecar(photo_id) for photo_id in outcomes},
         "Takeout/Google Photos/ORPHAN.jpg": b"jpeg",
+        "Takeout/Google Photos/GARBLED.jpg": b"jpeg",
+        "Takeout/Google Photos/GARBLED.jpg.supplemental-metadata.json": b"not json",
     })
     complete = _photo_archive("takeout-002.zip", "NEW2")
 
@@ -223,8 +227,8 @@ def test_one_summary_line_is_logged_per_archive(caplog):
 
     summaries = [record.getMessage() for record in caplog.records if ": " in record.getMessage() and " indexed, " in record.getMessage()]
     assert summaries == [
-        "takeout-001.zip: 1 indexed, 1 already indexed, 1 no Sidecar, 1 failed — kept",
-        "takeout-002.zip: 1 indexed, 0 already indexed, 0 no Sidecar, 0 failed — fully ingested",
+        "takeout-001.zip: 1 indexed, 1 already indexed, 1 no Sidecar, 1 bad Sidecar, 1 failed — kept",
+        "takeout-002.zip: 1 indexed, 0 already indexed, 0 no Sidecar, 0 bad Sidecar, 0 failed — fully ingested",
     ]
 
 
@@ -249,3 +253,13 @@ def test_a_success_finishing_after_the_abort_does_not_cancel_it(monkeypatch):
 
     with pytest.raises(RuntimeError, match="10 media files in a row failed"):
         ingest_archives([archive], index_media, archive_fully_ingested=lambda archive: None)
+
+
+def test_ingestion_does_not_load_the_imaging_stack():
+    # In a fresh interpreter, so modules other tests imported don't count.
+    loaded = subprocess.run(
+        [sys.executable, "-c", "import sys, src.takeout_ingestion; print(sorted(sys.modules))"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "'PIL'" not in loaded
+    assert "'pillow_heif'" not in loaded

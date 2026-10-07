@@ -8,6 +8,8 @@ from typing import Iterator
 
 import requests
 
+from .media_types import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, extension_of
+
 log = logging.getLogger(__name__)
 
 
@@ -26,8 +28,6 @@ def find_matching_sidecar(media_name: str, sidecars: dict[str, bytes]) -> bytes 
             return sidecar_bytes
     return None
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".wmv"}
 SIDECAR_EXTENSIONS = {".json"}
 
 # Minimum size of End of Central Directory record
@@ -51,7 +51,7 @@ class ZipEntry:
 
     @property
     def _ext(self) -> str:
-        return ("." + self.name.rsplit(".", 1)[-1].lower()) if "." in self.name else ""
+        return extension_of(self.name)
 
     @property
     def size(self) -> int:
