@@ -14,15 +14,23 @@ const STATUS_COLORS: Record<Status, string> = {
 export default function IngestionPanel() {
   const [status, setStatus] = useState<Status>("IDLE");
   const [triggering, setTriggering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchStatus = async () => {
-    const res = await fetch("/api/ingest/status");
-    if (!res.ok) return;
-    const data = await res.json();
-    setStatus(data.status);
-    if (data.status !== "RUNNING") {
-      if (pollRef.current) clearInterval(pollRef.current);
+    try {
+      const res = await fetch("/api/ingest/status");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to get ingestion status");
+      }
+      setStatus(data.status);
+      setError(data.error ?? null);
+      if (data.status !== "RUNNING") {
+        if (pollRef.current) clearInterval(pollRef.current);
+      }
+    } catch (err) {
+      setError((err as Error).message);
     }
   };
 
@@ -34,9 +42,17 @@ export default function IngestionPanel() {
   const handleTrigger = async () => {
     setTriggering(true);
     try {
-      await fetch("/api/ingest/trigger", { method: "POST" });
+      const res = await fetch("/api/ingest/trigger", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to start ingestion");
+      }
+      setError(null);
       setStatus("RUNNING");
+      if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(fetchStatus, 10_000);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setTriggering(false);
     }
@@ -69,6 +85,7 @@ export default function IngestionPanel() {
       >
         {triggering ? "Starting..." : "Start ingestion"}
       </button>
+      {error && <span role="alert" style={{ color: "#f44336", fontSize: "0.8rem" }}>{error}</span>}
     </div>
   );
 }

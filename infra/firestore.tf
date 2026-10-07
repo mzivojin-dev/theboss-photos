@@ -4,4 +4,3 @@ resource "google_firestore_database" "main" {
   location_id = var.region
   type        = "FIRESTORE_NATIVE"
 }
-

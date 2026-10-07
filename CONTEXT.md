@@ -17,6 +17,9 @@ The full-resolution photo or video extracted from a Takeout Archive. Stored in G
 **Ingestion Job**
 A Cloud Run Job that reads Takeout Archives from Google Drive via byte-range requests (no full ZIP download), extracts files in memory, generates Previews, and writes Previews and Originals to their respective GCS buckets.
 
+**Media Indexer**
+The part of the Ingestion Job that indexes one media file (photo or video) from a Takeout Archive, given its Sidecar metadata: it skips files already in the Photo Index, writes the Original and (for photos) the Preview Image, then writes the Photo Index document last, so a document's presence means the file is fully indexed.
+
 **Drive Folder**
 A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job.
 
@@ -42,7 +45,7 @@ Out of scope for MVP: albums, map view, search, face/object tagging, video playb
 
 ## Data Store
 
-**Photo Index** — Cloud Firestore collection storing one document per photo with: `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field). Queried for the timeline ordered by `taken_at`.
+**Photo Index** — Cloud Firestore collection storing one document per photo or video, with `media_type` (`photo` | `video`), `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field). Queried for the timeline ordered by `taken_at`.
 
 **Deduplication** — At ingestion time, each photo's `google_photos_id` is checked against the Photo Index before writing. Photos already present are skipped. Prevents duplicate entries when re-ingesting overlapping Takeout Archives.
 
