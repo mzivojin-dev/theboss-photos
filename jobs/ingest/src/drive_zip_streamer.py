@@ -1,9 +1,12 @@
 import io
 import logging
 import struct
+import time
 import zipfile
 from dataclasses import dataclass
 from typing import Iterator
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +34,11 @@ SIDECAR_EXTENSIONS = {".json"}
 EOCD_SIZE = 22
 EOCD_SIGNATURE = b"PK\x05\x06"
 
+# Drive drops or stalls the occasional connection over a run of thousands of range requests.
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_REQUEST_ATTEMPTS = 5
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
 
 @dataclass
 class ZipEntry:
@@ -44,6 +52,11 @@ class ZipEntry:
     @property
     def _ext(self) -> str:
         return ("." + self.name.rsplit(".", 1)[-1].lower()) if "." in self.name else ""
+
+    @property
+    def size(self) -> int:
+        """Uncompressed size in bytes."""
+        return self._file_size
 
     @property
     def is_image(self) -> bool:
@@ -70,7 +83,7 @@ class DriveZipStreamer:
 
     def _get_file_size(self) -> int:
         if self._file_size is None:
-            resp = self._http.get(self._download_url, headers={"Range": "bytes=0-0"})
+            resp = self._get({"Range": "bytes=0-0"})
             cr = resp.headers.get("Content-Range", "")
             if "/" in cr:
                 self._file_size = int(cr.split("/")[-1])
@@ -79,9 +92,24 @@ class DriveZipStreamer:
                 self._file_size = int(resp.headers["Content-Length"])
         return self._file_size
 
+    def _get(self, headers: dict[str, str]):
+        for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+            try:
+                resp = self._http.get(self._download_url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+                if resp.status_code not in RETRYABLE_STATUS_CODES:
+                    resp.raise_for_status()
+                    return resp
+                error: Exception = requests.HTTPError(f"HTTP {resp.status_code}")
+            except (requests.ConnectionError, requests.Timeout) as e:
+                error = e
+            if attempt == MAX_REQUEST_ATTEMPTS:
+                raise error
+            log.warning("Drive request for %s failed (%s), retry %d/%d",
+                        self._file_id, error, attempt, MAX_REQUEST_ATTEMPTS - 1)
+            time.sleep(2 ** attempt)
+
     def _range_read(self, start: int, end: int) -> bytes:
-        resp = self._http.get(self._download_url, headers={"Range": f"bytes={start}-{end}"})
-        return resp.content
+        return self._get({"Range": f"bytes={start}-{end}"}).content
 
     def _find_eocd(self, file_size: int) -> tuple[int, bytes]:
         # Read last 64KB to handle ZIP comments

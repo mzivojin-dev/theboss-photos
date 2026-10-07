@@ -5,7 +5,10 @@ Google Takeout splits a large export across several Takeout Archives, and a medi
 file's Sidecar is often in a different archive than the media itself.
 """
 import json
+import threading
+import time
 
+from src import takeout_ingestion
 from src.takeout_ingestion import TakeoutArchive, ingest_archives
 from tests.test_drive_zip_streamer import _build_zip, _make_streamer
 
@@ -84,3 +87,46 @@ def test_archive_with_unparseable_sidecar_is_not_fully_ingested():
 
     assert indexed == {}
     assert fully_ingested == []
+
+
+def _photos_archive(count: int, photo_bytes: bytes = b"jpeg") -> TakeoutArchive:
+    files = {}
+    for i in range(count):
+        files[f"Takeout/Google Photos/Photos from 2026/IMG_{i}.jpg"] = photo_bytes
+        files[f"Takeout/Google Photos/Photos from 2026/IMG_{i}.jpg.supplemental-metadata.json"] = _sidecar(f"IMG{i}")
+    return _archive("takeout-001.zip", files)
+
+
+def test_media_is_indexed_concurrently():
+    both_in_flight = threading.Barrier(2, timeout=5)
+
+    def index_media(entry, metadata):
+        both_in_flight.wait()  # raises BrokenBarrierError if media is indexed one at a time
+
+    ingest_archives([_photos_archive(2)], index_media, archive_fully_ingested=lambda archive: None)
+
+
+def test_media_in_flight_is_capped_by_total_size(monkeypatch):
+    monkeypatch.setattr(takeout_ingestion, "MEDIA_BYTES_IN_FLIGHT", 10)
+    in_flight, max_in_flight, lock = 0, 0, threading.Lock()
+
+    def index_media(entry, metadata):
+        nonlocal in_flight, max_in_flight
+        with lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        time.sleep(0.05)
+        with lock:
+            in_flight -= 1
+
+    fully_ingested = []
+    ingest_archives([_photos_archive(4, photo_bytes=b"x" * 8)], index_media, fully_ingested.append)
+
+    assert max_in_flight == 1, "two 8-byte files must not be in memory together under a 10-byte cap"
+    assert len(fully_ingested) == 1
+
+
+def test_media_larger_than_the_cap_is_still_indexed(monkeypatch):
+    monkeypatch.setattr(takeout_ingestion, "MEDIA_BYTES_IN_FLIGHT", 4)
+    indexed, _ = _ingest([_photos_archive(2, photo_bytes=b"x" * 50)])
+    assert sorted(indexed.values()) == ["IMG0", "IMG1"]

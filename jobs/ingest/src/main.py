@@ -15,9 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from urllib.parse import urlparse
 
-import requests
 from google.auth import default as google_auth_default
-from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.auth.transport.requests import AuthorizedSession, Request as GoogleAuthRequest
 from google.cloud import storage, firestore
 from googleapiclient.discovery import build
 
@@ -153,8 +152,8 @@ def run() -> None:
     zip_files = results.get("files", [])
     log.info("Found %d Takeout Archive(s) to process", len(zip_files))
 
-    auth_session = requests.Session()
-    auth_session.headers["Authorization"] = f"Bearer {credentials.token}"
+    # Refreshes the token on expiry; a run downloading many GB can outlast the one-hour token.
+    auth_session = AuthorizedSession(credentials)
 
     def index_media(entry: ZipEntry, metadata: PhotoMetadata) -> None:
         if repo.exists(metadata.google_photos_id):
