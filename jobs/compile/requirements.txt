@@ -1,0 +1,9 @@
+google-auth==2.29.0
+google-cloud-storage==2.19.0
+google-cloud-firestore==2.27.0
+protobuf>=5.29.6,<8.0.0
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+reverse_geocoder==1.5.1
+timezonefinder==9.0.0
+tzdata
