@@ -2,6 +2,10 @@ resource "google_cloud_run_v2_service" "app" {
   name     = "theboss-photos"
   location = var.region
   labels   = local.cost_labels
+  # Cloud Run's built-in IAP: only the account in iap.tf gets in. Without it, requests reach Cloud
+  # Run unauthenticated and get "403 Forbidden", since only the IAP service agent may invoke it.
+  iap_enabled  = true
+  launch_stage = "BETA"
 
   template {
     labels          = local.cost_labels
