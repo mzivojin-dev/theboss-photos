@@ -12,7 +12,7 @@ from src.index_outcome import Outcome
 from src.media_indexer import MediaIndexer
 from src.photo_index_repository import PhotoDoc
 from src.sidecar_parser import PhotoMetadata
-from tests.in_memory_adapters import InMemoryBlobStore, InMemoryPhotoIndex
+from tests.in_memory_adapters import InMemoryBlobStore, InMemoryPhotoIndex, StoredBlob
 
 TAKEN_AT = datetime(2026, 6, 12, tzinfo=timezone.utc)
 
@@ -160,4 +160,49 @@ def test_a_failed_upload_leaves_no_photo_index_document(failing_store):
 
     assert result.outcome is Outcome.FAILED
     assert "bucket not found" in result.reason
+    assert photo_index.docs == {}
+
+
+def test_a_staged_video_is_its_bytes_unchanged():
+    staging = InMemoryBlobStore()
+    indexer = MediaIndexer(InMemoryBlobStore(), InMemoryBlobStore(), InMemoryPhotoIndex(), staging=staging)
+
+    indexer.index(FakeMediaFile("Takeout/Google Photos/VID_1.MP4", b"video", is_video=True), _metadata("VVV"))
+
+    assert staging.blobs["VVV.mp4"] == StoredBlob(b"video", "video/mp4")
+
+
+def test_a_staged_photo_is_an_upright_jpeg_at_most_1920_pixels():
+    staging = InMemoryBlobStore()
+    indexer = MediaIndexer(InMemoryBlobStore(), InMemoryBlobStore(), InMemoryPhotoIndex(), staging=staging)
+    rotated = io.BytesIO()
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientation: rotate 90 degrees clockwise to display
+    Image.new("RGB", (4000, 3000)).save(rotated, format="JPEG", exif=exif)
+
+    indexer.index(FakeMediaFile("Takeout/Google Photos/IMG_1.HEIC", rotated.getvalue()), _metadata("AAA"))
+
+    staged = staging.blobs["AAA.jpg"]
+    assert staged.content_type == "image/jpeg"
+    assert Image.open(io.BytesIO(staged.data)).size == (1440, 1920)
+
+
+def test_nothing_is_staged_when_media_is_already_indexed():
+    existing = PhotoDoc(google_photos_id="AAA", filename="IMG_1.jpg", taken_at=TAKEN_AT, latitude=None, longitude=None)
+    staging = InMemoryBlobStore()
+    indexer = MediaIndexer(InMemoryBlobStore(), InMemoryBlobStore(), InMemoryPhotoIndex([existing]), staging=staging)
+
+    indexer.index(FakeMediaFile("Takeout/Google Photos/IMG_1.jpg", _image(10, 10)), _metadata("AAA"))
+
+    assert staging.blobs == {}
+
+
+def test_a_failed_staging_upload_leaves_no_photo_index_document():
+    photo_index = InMemoryPhotoIndex()
+    indexer = MediaIndexer(InMemoryBlobStore(), InMemoryBlobStore(), photo_index,
+                           staging=InMemoryBlobStore(fail_with=OSError("staging down")))
+
+    result = indexer.index(FakeMediaFile("Takeout/Google Photos/IMG_1.jpg", _image(10, 10)), _metadata("AAA"))
+
+    assert result.outcome is Outcome.FAILED
     assert photo_index.docs == {}

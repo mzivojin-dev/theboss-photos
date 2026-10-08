@@ -1,12 +1,13 @@
 """
-Indexes one media file from a Takeout Archive into Originals, Previews and the Photo Index.
+Indexes one media file from a Takeout Archive into Originals, Previews and the Photo Index, and
+stages it for the Compilation Job.
 """
 import logging
-from typing import Protocol
+from typing import Optional, Protocol
 
-from .image_processor import process as generate_preview
+from .image_processor import process as generate_preview, staged_jpeg
 from .index_outcome import IndexResult, Outcome
-from .media_types import content_type_for
+from .media_types import content_type_for, extension_of
 from .photo_index_repository import PhotoDoc
 from .sidecar_parser import PhotoMetadata
 
@@ -32,10 +33,12 @@ class PhotoIndex(Protocol):
 
 
 class MediaIndexer:
-    def __init__(self, originals: BlobStore, previews: BlobStore, photo_index: PhotoIndex):
+    def __init__(self, originals: BlobStore, previews: BlobStore, photo_index: PhotoIndex,
+                 staging: Optional[BlobStore] = None):
         self._originals = originals
         self._previews = previews
         self._photo_index = photo_index
+        self._staging = staging
 
     def index(self, media: MediaFile, metadata: PhotoMetadata) -> IndexResult:
         """Index one media file. Never raises: a failure is returned as FAILED, so it can't stop the run."""
@@ -59,6 +62,7 @@ class MediaIndexer:
 
         # The Photo Index document is written last: its presence means the file is fully indexed.
         self._originals.upload(original_path, raw_bytes, content_type=content_type_for(filename))
+        self._stage(metadata.google_photos_id, filename, raw_bytes, media.is_video)
         if media.is_video:
             self._photo_index.upsert(PhotoDoc(
                 google_photos_id=metadata.google_photos_id,
@@ -87,3 +91,20 @@ class MediaIndexer:
             height=preview.height,
         ))
         return IndexResult(Outcome.INDEXED)
+
+    def _stage(self, google_photos_id: str, filename: str, raw_bytes: bytes, is_video: bool) -> None:
+        """Copy the bytes already in memory to Staging, so the Compilation Job reads them from Standard
+        storage instead of Archive. Staged before the Photo Index document, like everything else."""
+        if self._staging is None:
+            return
+        path = staged_path(google_photos_id, filename, is_video)
+        if is_video:
+            self._staging.upload(path, raw_bytes, content_type=content_type_for(filename))
+        else:
+            self._staging.upload(path, staged_jpeg(raw_bytes), content_type="image/jpeg")
+
+
+def staged_path(google_photos_id: str, filename: str, is_video: bool) -> str:
+    """Where a media file is staged: the video as it is, a photo as a JPEG. The Compilation Job
+    looks files up by this name."""
+    return f"{google_photos_id}{extension_of(filename)}" if is_video else f"{google_photos_id}.jpg"
