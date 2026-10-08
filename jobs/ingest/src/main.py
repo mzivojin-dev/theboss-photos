@@ -4,6 +4,7 @@ Ingestion Job entry point.
 Reads Takeout Archive ZIPs from the configured Google Drive folder,
 extracts photos via byte-range requests, generates Preview Images,
 and writes Previews + Originals to GCS and metadata to Firestore.
+When configured, it also stages new media and starts the Compilation Job.
 """
 import os
 import logging
@@ -19,6 +20,7 @@ from google.auth.transport.requests import AuthorizedSession, Request as GoogleA
 from google.cloud import storage, firestore
 from googleapiclient.discovery import build
 
+from .compilation_trigger import CloudRunJob, CompilationTrigger
 from .drive_zip_streamer import DriveZipStreamer
 from .gcs_blob_store import GcsBlobStore
 from .media_indexer import MediaIndexer
@@ -46,6 +48,10 @@ PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 PREVIEWS_BUCKET = os.environ["PREVIEWS_BUCKET"]
 ORIGINALS_BUCKET = os.environ["ORIGINALS_BUCKET"]
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+# Optional: stage new media for the Compilation Job, and start that job after a run.
+STAGING_BUCKET = os.environ.get("STAGING_BUCKET")
+COMPILE_JOB_NAME = os.environ.get("COMPILE_JOB_NAME")
+GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 
 
 def _run_ingestion() -> None:
@@ -139,6 +145,7 @@ def run() -> None:
         originals=GcsBlobStore(gcs.bucket(ORIGINALS_BUCKET)),
         previews=GcsBlobStore(gcs.bucket(PREVIEWS_BUCKET)),
         photo_index=PhotoIndexRepository(db=db),
+        staging=GcsBlobStore(gcs.bucket(STAGING_BUCKET)) if STAGING_BUCKET else None,
     )
 
     # List all ZIP files in the Drive folder
@@ -170,7 +177,11 @@ def run() -> None:
         )
         for zip_file in zip_files
     ]
-    ingest_archives(archives, indexer.index, archive_fully_ingested)
+    compilation = CompilationTrigger(
+        CloudRunJob(auth_session, PROJECT_ID, GCP_REGION, COMPILE_JOB_NAME).start if COMPILE_JOB_NAME else None
+    )
+    ingest_archives(archives, compilation.counting(indexer.index), archive_fully_ingested)
+    compilation.after_run()
 
     log.info("Ingestion complete.")
 

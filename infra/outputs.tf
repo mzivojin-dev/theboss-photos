@@ -18,6 +18,18 @@ output "ingest_job_name" {
   value = google_cloud_run_v2_job.ingest.name
 }
 
+output "compile_job_name" {
+  value = google_cloud_run_v2_job.compile.name
+}
+
+output "staging_bucket" {
+  value = google_storage_bucket.staging.name
+}
+
+output "compilations_bucket" {
+  value = google_storage_bucket.compilations.name
+}
+
 output "billing_export_dataset_id" {
   value       = google_bigquery_dataset.billing_export.dataset_id
   description = "BigQuery dataset to select when enabling Cloud Billing detailed export."

@@ -20,12 +20,19 @@ Google Drive folder
         │
         ├── Preview Image (1280px WebP) ──► GCS Standard  ◄── Next.js app (signed URLs)
         ├── Original (full-res)         ──► GCS Archive   ◄── on-demand download
+        ├── Staged copy (new media)     ──► GCS Standard (30 days) ─┐
         └── Metadata                    ──► Firestore     ◄── timeline queries
+        │                                                            │
+        ▼  (jobs.run, after a run that indexed new media)            ▼
+   Compilation Job (Cloud Run Job, Python + ffmpeg)  ── reads staged media, the Photo Index
+        └── Compilation (trip video)    ──► GCS Standard  + `compilations` in Firestore
 ```
 
 **App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline, lightbox with prev/next, on-demand original download, ingestion trigger + status polling.
 
 **Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, then deletes the ZIP from Drive. Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
+
+**Compilation Job** — Cloud Run Job, started by the Ingestion Job after a run that indexed new media. Finds Trips (runs of days more than 50 km from home, with video) and makes a Compilation for each Trip whose media changed: the best stretch of each clip, photos preferring clear faces, a chapter per day, captions, and public-domain music. Output keeps the footage's orientation and HDR. See [ADR 0001](docs/adr/0001-compilations-via-staging-and-a-job-started-by-ingestion.md).
 
 ## Prerequisites
 
@@ -47,7 +54,7 @@ terraform apply \
   -var="drive_folder_id=<your-drive-folder-id>"
 ```
 
-This provisions: two GCS buckets (Standard for previews, Archive for originals), Firestore database `photo-lib`, Cloud Run service + job, service account, and IAP.
+This provisions: four GCS buckets (Standard for previews, staging and compilations; Archive for originals), Firestore database `photo-lib`, the Cloud Run service, the ingestion and compilation jobs, the service account, and IAP.
 
 ### Cost attribution and analysis
 
@@ -110,6 +117,15 @@ docker build -t gcr.io/photolib-405112/theboss-photos-ingest:latest .
 docker push gcr.io/photolib-405112/theboss-photos-ingest:latest
 ```
 
+**Compilation job:**
+```bash
+cd jobs/compile
+docker build -t gcr.io/photolib-405112/theboss-photos-compile:latest .
+docker push gcr.io/photolib-405112/theboss-photos-compile:latest
+```
+
+The compilation image must be pushed before the first `terraform apply` that creates the job, or Cloud Run rejects the job.
+
 ### 3. Deploy
 
 ```bash
@@ -149,7 +165,7 @@ The Compose setup runs the Next.js app locally while connecting to the configure
    ```
 
    Replace `<project-id>` with the project ID from `.env`. Verify that `%APPDATA%\gcloud\application_default_credentials.json` exists as a file (not a directory). If Docker previously created an empty directory at that exact path because the credentials file was missing, remove that empty directory before running the login command. The Compose services mount the resulting credentials file read-only and will fail to start if it is missing. Plain user ADC without service-account impersonation can access Google APIs but cannot sign the app's storage URLs.
-3. Start Docker Desktop, then run `build.bat` from the repository root. Alternatively, run `docker compose build app ingest`.
+3. Start Docker Desktop, then run `build.bat` from the repository root. Alternatively, run `docker compose build app ingest` (and `docker compose --profile compile build compile` for the Compilation Job).
 4. Start the app with `docker compose up -d` and open <http://localhost:3000>. View logs with `docker compose logs -f app`; stop it with `docker compose down`.
 
 Compose starts both the web app and a private local ingestion service. Its **Start Ingestion** button runs ingestion in that service; the ingestion container stays available and runs a job only when triggered. In Cloud Run, Terraform sets the trigger mode to `cloud`, so the same button starts the configured Cloud Run Job instead.
@@ -160,9 +176,14 @@ gcloud auth application-default login --impersonate-service-account=theboss-phot
 
 For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, and the impersonated service account must be able to read the Drive folder and files. Local Compose leaves processed ZIPs in Drive by default, so it does not need delete permission. You can enable deletion by setting `DELETE_PROCESSED_DRIVE_FILES=true` on the `ingest` service in `compose.yaml`; the service account must then have permission to delete the files (Shared Drive files may require the Content manager role).
 
+**Compilations locally:** set `STAGING_BUCKET` in `.env` to stage new media during local ingestion, and `COMPILATIONS_BUCKET` to run the Compilation Job with `docker compose run --rm compile`. It reads the real Photo Index and buckets, and writes real Compilations. Leave `COMPILE_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
+
 **Run Python tests:**
 ```bash
 cd jobs/ingest
+python -m pytest
+cd ../compile
+python -m pip install -r requirements-dev.txt   # tzdata gives Windows a time zone database
 python -m pytest
 ```
 
