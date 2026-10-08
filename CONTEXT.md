@@ -61,7 +61,7 @@ Out of scope for MVP: albums, map view, search, face/object tagging, video playb
 
 **Photo Index** — Cloud Firestore collection storing one document per photo or video, with `media_type` (`photo` | `video`), `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field). Queried for the timeline ordered by `taken_at`.
 
-**Compilations** — Firestore collection with one document per Trip, keyed `<first day>_<last day>`: status (`rendering`, `ready`, `skipped`, `failed`), the membership hash of the Trip's media (a Compilation is made again when it changes), title, dates, chapters, music credits and the video's path in the compilations bucket.
+**Compilations** — Firestore collection with one document per Trip, keyed `<first day>_<last day>`: status (`rendering`, `ready`, `skipped`, `failed`, `superseded`), the membership hash of the Trip's media (a Compilation is made again when it changes), attempts (a Trip is given up after 2 failed or killed attempts, until its media changes), title, dates, chapters, music credits and the video's path in the compilations bucket.
 
 **Deduplication** — At ingestion time, each photo's `google_photos_id` is checked against the Photo Index before writing. Photos already present are skipped. Prevents duplicate entries when re-ingesting overlapping Takeout Archives.
 

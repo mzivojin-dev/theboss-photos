@@ -94,14 +94,18 @@ class MediaIndexer:
 
     def _stage(self, google_photos_id: str, filename: str, raw_bytes: bytes, is_video: bool) -> None:
         """Copy the bytes already in memory to Staging, so the Compilation Job reads them from Standard
-        storage instead of Archive. Staged before the Photo Index document, like everything else."""
+        storage instead of Archive. Staging is optional: if it fails, the file is still indexed and the
+        Compilation Job falls back to its Original or Preview."""
         if self._staging is None:
             return
         path = staged_path(google_photos_id, filename, is_video)
-        if is_video:
-            self._staging.upload(path, raw_bytes, content_type=content_type_for(filename))
-        else:
-            self._staging.upload(path, staged_jpeg(raw_bytes), content_type="image/jpeg")
+        try:
+            if is_video:
+                self._staging.upload(path, raw_bytes, content_type=content_type_for(filename))
+            else:
+                self._staging.upload(path, staged_jpeg(raw_bytes), content_type="image/jpeg")
+        except Exception as error:
+            log.warning("Failed to stage %s: %s: %s", filename, type(error).__name__, error)
 
 
 def staged_path(google_photos_id: str, filename: str, is_video: bool) -> str:

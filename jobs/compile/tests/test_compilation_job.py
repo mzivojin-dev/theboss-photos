@@ -1,6 +1,8 @@
 """
 Tests for compilation_job.CompilationJob: which trips get a Compilation, and what is recorded.
 """
+from datetime import datetime, timedelta, timezone
+
 from src.compilation_job import CompilationJob, Made, Skipped
 from src.renderer import Rendered
 from tests.builders import KITCHENER, TIMISOARA, TORONTO, days, item, localised
@@ -18,13 +20,21 @@ class InMemoryStore:
         self.docs[trip_id] = fields
         self.saves.append((trip_id, fields["status"]))
 
+    def all(self):
+        return dict(self.docs)
+
 
 class InMemoryVideos:
     def __init__(self):
         self.uploaded: list[str] = []
 
+        self.deleted: list[str] = []
+
     def upload_file(self, path, local_path, content_type):
         self.uploaded.append(path)
+
+    def delete(self, path):
+        self.deleted.append(path)
 
 
 class Maker:
@@ -115,3 +125,73 @@ def test_cloud_run_tasks_split_the_trips():
 
     assert first.made == ["2026-03-21_2026-03-21"]
     assert second.made == ["2026-06-20_2026-06-22"]
+
+
+TRIP = "2026-06-20_2026-06-22"
+
+
+class Clock:
+    def __init__(self):
+        self.now = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+
+    def __call__(self):
+        return self.now
+
+
+class Killed(BaseException):
+    """Stands in for the task being killed mid-render (out of memory): nothing gets recorded."""
+
+
+def test_a_trip_another_execution_is_rendering_is_left_to_it():
+    library, store, clock = _library(), InMemoryStore(), Clock()
+    try:
+        CompilationJob(store, InMemoryVideos(), Maker(fail_with=Killed()), now=clock).run(library)
+    except Killed:
+        pass
+    maker = Maker()
+    clock.now += timedelta(hours=1)
+
+    summary = CompilationJob(store, InMemoryVideos(), maker, now=clock).run(library)
+
+    assert summary.in_progress == [TRIP] and maker.made == []
+
+
+def test_a_render_that_died_counts_as_an_attempt_and_is_retried():
+    library, store, clock = _library(), InMemoryStore(), Clock()
+    try:
+        CompilationJob(store, InMemoryVideos(), Maker(fail_with=Killed()), now=clock).run(library)
+    except Killed:
+        pass
+    clock.now += timedelta(hours=7)
+    maker = Maker()
+
+    CompilationJob(store, InMemoryVideos(), maker, now=clock).run(library)
+
+    assert maker.made == [TRIP]
+    assert store.docs[TRIP]["status"] == "ready" and store.docs[TRIP]["attempts"] == 2
+
+
+def test_a_trip_is_given_up_after_two_attempts_until_its_media_changes():
+    library, store = _library(), InMemoryStore()
+    for _ in range(2):
+        CompilationJob(store, InMemoryVideos(), Maker(fail_with=RuntimeError("ffmpeg failed"))).run(library)
+    third = Maker()
+
+    summary = CompilationJob(store, InMemoryVideos(), third).run(library)
+    CompilationJob(store, InMemoryVideos(), third).run(localised([*library, item("2026-06-21 18:00", TIMISOARA)]))
+
+    assert summary.given_up == [TRIP]
+    assert third.made == [TRIP]  # only after new media
+    assert store.docs[TRIP]["status"] == "ready"
+
+
+def test_a_compilation_whose_trip_moved_is_superseded_and_its_video_deleted():
+    library, store, videos = _library(), InMemoryStore(), InMemoryVideos()
+    CompilationJob(store, videos, Maker()).run(library)
+
+    summary = CompilationJob(store, videos, Maker()).run(localised([*library, item("2026-06-19 18:00", TIMISOARA)]))
+
+    assert summary.made == ["2026-06-19_2026-06-22"]
+    assert summary.superseded == [TRIP]
+    assert videos.deleted == [f"{TRIP}.mp4"]
+    assert store.docs[TRIP]["status"] == "superseded" and store.docs[TRIP]["video_gcs_path"] is None

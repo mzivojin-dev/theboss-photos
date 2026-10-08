@@ -197,12 +197,13 @@ def test_nothing_is_staged_when_media_is_already_indexed():
     assert staging.blobs == {}
 
 
-def test_a_failed_staging_upload_leaves_no_photo_index_document():
+def test_a_failed_staging_upload_still_indexes_the_file(caplog):
     photo_index = InMemoryPhotoIndex()
     indexer = MediaIndexer(InMemoryBlobStore(), InMemoryBlobStore(), photo_index,
-                           staging=InMemoryBlobStore(fail_with=OSError("staging down")))
+                           staging=InMemoryBlobStore(fail_with=OSError("503 staging unavailable")))
 
     result = indexer.index(FakeMediaFile("Takeout/Google Photos/IMG_1.jpg", _image(10, 10)), _metadata("AAA"))
 
-    assert result.outcome is Outcome.FAILED
-    assert photo_index.docs == {}
+    assert result.outcome is Outcome.INDEXED
+    assert "AAA" in photo_index.docs
+    assert "Failed to stage IMG_1.jpg" in caplog.text

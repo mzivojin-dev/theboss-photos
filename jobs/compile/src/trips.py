@@ -4,8 +4,10 @@ Finds Trips in the Photo Index: runs of days away from home that have video.
 Sidecar times are UTC, so every item is first put in the local time where it was taken: a Saturday
 evening in Ontario must not count as Sunday.
 """
+import bisect
 import hashlib
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Optional
@@ -65,20 +67,36 @@ def localise(items: list[MediaItem], time_zone_at: TimeZoneAt, place_names: Plac
     if located:
         for item, place in zip(located, place_names([(i.latitude, i.longitude) for i in located])):
             item.place = place
+    by_time = sorted(located, key=lambda i: i.taken_at)
+    times = [i.taken_at for i in by_time]
     for item in items:
         if not item.located:
-            nearest = min(located, key=lambda i: abs(i.taken_at - item.taken_at), default=None)
+            nearest = _nearest_in_time(by_time, times, item.taken_at)
             item.time_zone = nearest.time_zone if nearest else "UTC"
         item.local = item.taken_at.astimezone(ZoneInfo(item.time_zone))
+
+
+def _nearest_in_time(by_time: list[MediaItem], times: list, moment) -> Optional[MediaItem]:
+    k = bisect.bisect_left(times, moment)
+    neighbours = by_time[max(0, k - 1):k + 1]
+    return min(neighbours, key=lambda i: abs(i.taken_at - moment), default=None)
 
 
 def find_home(items: list[MediaItem], away_km: float = AWAY_KM) -> Optional[tuple[float, float]]:
     """The place with the most *days* of media within away_km. Not the most media: a busy holiday
     can produce more photos than months at home."""
-    located = [i for i in items if i.located]
-    candidates = {(round(i.latitude, 1), round(i.longitude, 1)) for i in located}
-    return max(candidates, default=None,
-               key=lambda c: len({i.day for i in located if km(c, (i.latitude, i.longitude)) <= away_km}))
+    # Media is grouped into cells of 0.1 degree (about 10 km) first, so this is cells x cells, not
+    # cells x media: a library of 100k items has a few thousand cells at most.
+    days_by_cell: dict[tuple[float, float], set[date]] = defaultdict(set)
+    for i in items:
+        if i.located:
+            days_by_cell[(round(i.latitude, 1), round(i.longitude, 1))].add(i.day)
+    cells = list(days_by_cell)
+
+    def days_near(cell: tuple[float, float]) -> int:
+        return len(set().union(*(days_by_cell[other] for other in cells if km(cell, other) <= away_km)))
+
+    return max(cells, key=days_near, default=None)
 
 
 def find_trips(items: list[MediaItem], away_km: float = AWAY_KM) -> list[Trip]:

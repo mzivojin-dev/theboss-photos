@@ -21,11 +21,7 @@ from .trips import localise
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-PROJECT_ID = os.environ["GCP_PROJECT_ID"]
-STAGING_BUCKET = os.environ["STAGING_BUCKET"]
-ORIGINALS_BUCKET = os.environ["ORIGINALS_BUCKET"]
-PREVIEWS_BUCKET = os.environ["PREVIEWS_BUCKET"]
-COMPILATIONS_BUCKET = os.environ["COMPILATIONS_BUCKET"]
+REQUIRED = ["GCP_PROJECT_ID", "STAGING_BUCKET", "ORIGINALS_BUCKET", "PREVIEWS_BUCKET", "COMPILATIONS_BUCKET"]
 MUSIC = os.environ.get("COMPILATION_MUSIC", "true").lower() == "true"
 TASK_INDEX = int(os.environ.get("CLOUD_RUN_TASK_INDEX", "0"))
 TASK_COUNT = int(os.environ.get("CLOUD_RUN_TASK_COUNT", "1"))
@@ -37,8 +33,14 @@ def place_names(points: list[tuple[float, float]]) -> list[str]:
 
 
 def run() -> int:
-    db = firestore.Client(project=PROJECT_ID, database="photo-lib")
-    gcs = storage.Client(project=PROJECT_ID)
+    missing = [name for name in REQUIRED if not os.environ.get(name)]
+    if missing:
+        # Fail before any work: with an empty bucket name every trip would fail, some only after rendering.
+        log.error("Set %s (see .env.example)", ", ".join(missing))
+        return 2
+    env = os.environ
+    db = firestore.Client(project=env["GCP_PROJECT_ID"], database="photo-lib")
+    gcs = storage.Client(project=env["GCP_PROJECT_ID"])
 
     items = load_photo_index(db)
     log.info("Task %d/%d: %d item(s) in the Photo Index", TASK_INDEX + 1, TASK_COUNT, len(items))
@@ -47,9 +49,10 @@ def run() -> int:
 
     job = CompilationJob(
         store=FirestoreCompilationStore(db),
-        videos=GcsVideoStore(gcs.bucket(COMPILATIONS_BUCKET)),
+        videos=GcsVideoStore(gcs.bucket(env["COMPILATIONS_BUCKET"])),
         make=CompilationMaker(
-            GcsMediaSource(gcs.bucket(STAGING_BUCKET), gcs.bucket(ORIGINALS_BUCKET), gcs.bucket(PREVIEWS_BUCKET)),
+            GcsMediaSource(gcs.bucket(env["STAGING_BUCKET"]), gcs.bucket(env["ORIGINALS_BUCKET"]),
+                           gcs.bucket(env["PREVIEWS_BUCKET"])),
             music=MUSIC,
         ),
     )

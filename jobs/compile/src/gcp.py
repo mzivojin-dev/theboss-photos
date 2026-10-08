@@ -44,6 +44,9 @@ class FirestoreCompilationStore:
     def save(self, trip_id: str, fields: dict) -> None:
         self._collection.document(trip_id).set(fields)
 
+    def all(self) -> dict[str, dict]:
+        return {doc.id: doc.to_dict() for doc in self._collection.stream()}
+
 
 class GcsVideoStore:
     def __init__(self, bucket: storage.Bucket):
@@ -51,6 +54,12 @@ class GcsVideoStore:
 
     def upload_file(self, path: str, local_path: str, content_type: str) -> None:
         self._bucket.blob(path).upload_from_filename(local_path, content_type=content_type)
+
+    def delete(self, path: str) -> None:
+        try:
+            self._bucket.blob(path).delete()
+        except NotFound:
+            pass
 
 
 class GcsMediaSource:

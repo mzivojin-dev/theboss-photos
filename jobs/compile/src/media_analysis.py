@@ -55,7 +55,8 @@ def _signals(path: str, has_audio: bool) -> dict[int, Signal]:
             second = 0
             for line in open(log):
                 if line.startswith("frame:"):
-                    second = int(float(re.search(r"pts_time:([\d.]+)", line).group(1)))
+                    # A clip with an edit list can start slightly before zero (pts_time:-0.021).
+                    second = max(0, int(float(re.search(r"pts_time:(-?[\d.]+)", line).group(1))))
                 elif "=" in line:
                     key, value = line.strip().rsplit("=", 1)
                     key = key.rsplit(".", 1)[-1]

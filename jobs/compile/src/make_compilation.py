@@ -2,7 +2,7 @@
 Makes one trip's Compilation: fetches its media, measures it, plans the edit, and renders it.
 """
 import logging
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol, TypeVar
 
 from .compilation_job import Made, Skipped
 from .edit_plan import enough_footage, footage_seconds, plan_edit, segment_label
@@ -12,6 +12,8 @@ from .renderer import Look, render
 from .trips import Trip
 
 log = logging.getLogger(__name__)
+
+A = TypeVar("A")
 
 
 class MediaSource(Protocol):
@@ -24,10 +26,10 @@ class CompilationMaker:
         self._music = music
 
     def __call__(self, trip: Trip, workdir: str) -> Made | Skipped:
-        clips = [analyse_clip(item, path) for item, path in self._fetch(trip.clips, workdir)]
+        clips = self._analyse(analyse_clip, self._fetch(trip.clips, workdir))
         if not enough_footage(clips):
             return Skipped(f"{len(clips)} clip(s), {footage_seconds(clips):.0f}s of footage")
-        photos = [analyse_photo(item, path) for item, path in self._fetch(trip.photos, workdir)]
+        photos = self._analyse(analyse_photo, self._fetch(trip.photos, workdir))
         log.info("  %d of %d photos have clear faces", sum(1 for p in photos if p.faces), len(photos))
 
         plan = plan_edit(trip, clips, photos)
@@ -40,6 +42,17 @@ class CompilationMaker:
         rendered = render(plan, look, workdir, music=self._music)
         return Made(rendered=rendered, title=plan.title, dates=plan.dates, look=look.description,
                     clips=len(clips), photos=len(photos))
+
+    @staticmethod
+    def _analyse(analyse: Callable[[MediaItem, str], A], fetched: list[tuple[MediaItem, str]]) -> list[A]:
+        """A file that can't be read (truncated, corrupt) is left out rather than failing the trip."""
+        analysed = []
+        for item, path in fetched:
+            try:
+                analysed.append(analyse(item, path))
+            except Exception as error:
+                log.warning("  Can't read %s, leaving it out: %s", item.filename, str(error).strip()[-300:])
+        return analysed
 
     def _fetch(self, items: list[MediaItem], workdir: str) -> list[tuple[MediaItem, str]]:
         fetched = []
