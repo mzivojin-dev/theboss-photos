@@ -18,5 +18,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
+docker compose --profile compile build compile
+if errorlevel 1 (
+    echo Docker image build failed.
+    exit /b 1
+)
+
 echo Docker images built successfully.
 exit /b 0

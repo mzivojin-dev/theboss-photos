@@ -17,6 +17,20 @@ resource "google_storage_bucket_iam_member" "app_originals_rw" {
   member = "serviceAccount:${google_service_account.app.email}"
 }
 
+# GCS: read/write staging bucket (Ingestion Job writes, Compilation Job reads)
+resource "google_storage_bucket_iam_member" "app_staging_rw" {
+  bucket = google_storage_bucket.staging.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.app.email}"
+}
+
+# GCS: read/write compilations bucket
+resource "google_storage_bucket_iam_member" "app_compilations_rw" {
+  bucket = google_storage_bucket.compilations.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.app.email}"
+}
+
 # Firestore: read/write
 resource "google_project_iam_member" "app_firestore" {
   project = var.project_id
@@ -24,7 +38,8 @@ resource "google_project_iam_member" "app_firestore" {
   member  = "serviceAccount:${google_service_account.app.email}"
 }
 
-# Cloud Run Jobs: invoke (so the Next.js API route can trigger the ingestion job)
+# Cloud Run Jobs: invoke (so the Next.js API route can trigger the ingestion job, and the
+# ingestion job can start the compilation job)
 resource "google_project_iam_member" "app_run_jobs" {
   project = var.project_id
   role    = "roles/run.developer"
