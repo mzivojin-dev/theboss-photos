@@ -19,6 +19,7 @@ from google.auth import default as google_auth_default
 from google.auth.transport.requests import AuthorizedSession, Request as GoogleAuthRequest
 from google.cloud import storage, firestore
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from .compilation_trigger import CloudRunJob, CompilationTrigger
 from .drive_zip_streamer import DriveZipStreamer
@@ -163,11 +164,17 @@ def run() -> None:
     auth_session = AuthorizedSession(credentials)
 
     def archive_fully_ingested(archive: TakeoutArchive) -> None:
-        if DELETE_PROCESSED_DRIVE_FILES:
-            drive.files().delete(fileId=archive.file_id, supportsAllDrives=True).execute()
-            log.info("Deleted archive from Drive: %s", archive.name)
-        else:
+        if not DELETE_PROCESSED_DRIVE_FILES:
             log.info("Leaving processed archive in Drive: %s", archive.name)
+            return
+        # Only a file's owner can delete it from a My Drive folder, so the service account is usually
+        # refused for ZIPs you uploaded. That must not stop the run: everything in the ZIP is indexed.
+        try:
+            drive.files().delete(fileId=archive.file_id, supportsAllDrives=True).execute()
+        except HttpError as error:
+            log.warning("Could not delete %s from Drive (%s); remove it by hand", archive.name, error.status_code)
+        else:
+            log.info("Deleted archive from Drive: %s", archive.name)
 
     archives = [
         TakeoutArchive(

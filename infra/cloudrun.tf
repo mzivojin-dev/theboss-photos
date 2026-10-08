@@ -76,6 +76,11 @@ resource "google_cloud_run_v2_job" "ingest" {
           name  = "DRIVE_FOLDER_ID"
           value = var.drive_folder_id
         }
+        # The service account can't delete ZIPs you own in a My Drive folder; clear the folder by hand.
+        env {
+          name  = "DELETE_PROCESSED_DRIVE_FILES"
+          value = "false"
+        }
         env {
           name  = "STAGING_BUCKET"
           value = google_storage_bucket.staging.name

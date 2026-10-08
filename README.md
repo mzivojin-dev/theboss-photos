@@ -30,7 +30,7 @@ Google Drive folder
 
 **App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline, lightbox with prev/next, on-demand original download, ingestion trigger + status polling.
 
-**Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, then deletes the ZIP from Drive. Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
+**Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, and logs whether the ZIP was fully ingested (you then delete it from Drive). Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
 
 **Compilation Job** — Cloud Run Job, started by the Ingestion Job after a run that indexed new media. Finds Trips (runs of days more than 50 km from home, with video) and makes a Compilation for each Trip whose media changed: the best stretch of each clip, photos preferring clear faces, a chapter per day, captions, and public-domain music. Output keeps the footage's orientation and HDR. See [ADR 0001](docs/adr/0001-compilations-via-staging-and-a-job-started-by-ingestion.md).
 
@@ -144,7 +144,7 @@ The app URL is printed as a Terraform output. IAP will prompt for your Google ac
 3. **Open the app** and click **Start Ingestion**. A status badge shows Running → Done / Failed.
 4. **Browse** the timeline. Scroll to load more. Click a photo for the lightbox. Use the download button to retrieve the full-resolution original.
 
-Ingestion is safe to re-run — already-indexed photos are skipped. Cloud Run deletes ZIPs from Drive after successful processing.
+Ingestion is safe to re-run — already-indexed photos are skipped. Processed ZIPs stay in Drive: the service account can't delete files you own in a My Drive folder, so delete them yourself once the archive summary in the job logs says `fully ingested` (an archive that is `kept` still has files without a Sidecar, usually because another part of the export is missing).
 
 ## Development
 

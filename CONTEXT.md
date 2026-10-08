@@ -33,7 +33,7 @@ An edited video of one Trip: the best stretch of each clip (loud, some movement,
 A Cloud Run Job that makes a Compilation for each Trip whose media changed since its last one. Started by the Ingestion Job after a run that indexed new media. No AI: highlights come from ffmpeg measurements and photos are ranked by face detection.
 
 **Drive Folder**
-A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job.
+A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job, and removed by the user once fully ingested: the service account can't delete files the user owns.
 
 ## Storage
 
