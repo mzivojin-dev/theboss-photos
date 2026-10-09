@@ -32,6 +32,9 @@ An edited video of one Trip: the best stretch of each clip (loud, some movement,
 **Compilation Job**
 A Cloud Run Job that makes a Compilation for each Trip whose media changed since its last one. Started by the Ingestion Job after a run that indexed new media. No AI: highlights come from ffmpeg measurements and photos are ranked by face detection.
 
+**Similar Group**
+Photos taken within 2 minutes of each other whose perceptual hashes differ in at most 10 of 64 bits and that have the same number of clear faces (bursts, retakes). One photo is the cover (clear faces, then sharpness, then exposure); the Timeline shows the cover alone with a "+N" badge, and the Lightbox shows the rest as a strip. Every file is kept; nothing is deleted. Recorded in the Photo Index as `grouped_under` (on each photo behind the cover) and `group_size` (on the cover), with the measurements in `similar_*` fields. Written by the grouping job (`python -m src.group_main` in `jobs/compile`), which measures only photos it hasn't yet and regroups all.
+
 **Drive Folder**
 A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job, and removed by the user once fully ingested: the service account can't delete files the user owns.
 
@@ -47,7 +50,7 @@ A designated Google Drive folder owned by a single Google account (personal use)
 
 ## Timeline UX
 
-Infinite scroll — loads 50 photos per batch ordered by `taken_at` descending. Next batch triggered automatically when user scrolls to the bottom. Uses Firestore cursor pagination internally.
+Infinite scroll, sectioned by local day — loads 50 Timeline tiles per batch ordered by `taken_at` descending. Photos hidden behind a Similar Group's cover are skipped. Next batch triggered automatically when user scrolls to the bottom. Uses Firestore cursor pagination internally.
 
 ## MVP Scope
 

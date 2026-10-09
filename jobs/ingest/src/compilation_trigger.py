@@ -1,5 +1,5 @@
 """
-Starts the Compilation Job once an ingestion run has indexed new media, so trips get their
+Starts the Compilation Job (and the photo grouping job) once an ingestion run has indexed new media, so trips get their
 Compilations without anyone pressing a button. One start per run, however much was indexed.
 """
 import logging
@@ -27,6 +27,20 @@ class CloudRunJob:
     def start(self) -> None:
         response = self._session.post(self._url, json={}, timeout=60)
         response.raise_for_status()
+
+
+def start_all(starts: list[Callable[[], None]]) -> Callable[[], None]:
+    """Starts every job even if one fails to start, then raises the first failure."""
+    def start() -> None:
+        failures = []
+        for start_job in starts:
+            try:
+                start_job()
+            except Exception as err:
+                failures.append(err)
+        if failures:
+            raise failures[0]
+    return start
 
 
 class CompilationTrigger:

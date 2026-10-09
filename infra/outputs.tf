@@ -39,3 +39,7 @@ output "monthly_budget_name" {
   value       = try(google_billing_budget.project_monthly[0].name, null)
   description = "Project-scoped monthly budget, or null when billing_account_id is unset."
 }
+
+output "group_job_name" {
+  value = google_cloud_run_v2_job.group.name
+}

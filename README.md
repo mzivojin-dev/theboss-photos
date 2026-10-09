@@ -124,7 +124,7 @@ docker build -t gcr.io/photolib-405112/theboss-photos-compile:latest .
 docker push gcr.io/photolib-405112/theboss-photos-compile:latest
 ```
 
-The compilation image must be pushed before the first `terraform apply` that creates the job, or Cloud Run rejects the job.
+The compilation image must be pushed before the first `terraform apply` that creates the jobs, or Cloud Run rejects them. The photo grouping job (`theboss-photos-group`) runs from this same image.
 
 ### 3. Deploy
 
@@ -175,6 +175,8 @@ gcloud auth application-default login --impersonate-service-account=theboss-phot
 ```
 
 For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, and the impersonated service account must be able to read the Drive folder and files. Local Compose leaves processed ZIPs in Drive by default, so it does not need delete permission. You can enable deletion by setting `DELETE_PROCESSED_DRIVE_FILES=true` on the `ingest` service in `compose.yaml`; the service account must then have permission to delete the files (Shared Drive files may require the Content manager role).
+
+**Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes `grouped_under`/`group_size` fields only; no file is deleted. In Cloud Run the ingestion job starts `theboss-photos-group` after a run that indexed anything; to group an existing library once, run `gcloud run jobs execute theboss-photos-group --region us-central1`.
 
 **Compilations locally:** set `STAGING_BUCKET` in `.env` to stage new media during local ingestion, and `COMPILATIONS_BUCKET` to run the Compilation Job with `docker compose run --rm compile`. It reads the real Photo Index and buckets, and writes real Compilations. Leave `COMPILE_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 

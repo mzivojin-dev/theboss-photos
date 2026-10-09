@@ -81,11 +81,11 @@ _detector = None
 
 
 def analyse_photo(item: MediaItem, path: str) -> Photo:
-    faces, score = _faces(path)
+    faces, score = faces_in(path)
     return Photo(item=item, path=path, faces=faces, face_score=score)
 
 
-def _faces(path: str) -> tuple[int, float]:
+def faces_in(path: str) -> tuple[int, float]:
     """How many clear faces a photo has, and a 0-1 score that grows with their size."""
     global _detector
     image = cv2.imread(path)

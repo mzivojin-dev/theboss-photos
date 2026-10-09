@@ -3,16 +3,12 @@ import { PhotoIndexRepository } from "@/lib/photo-index-repository";
 import { generateSignedPreviewUrl } from "@/lib/gcs";
 import { db, previewsBucket } from "@/lib/gcp-clients";
 
-export async function GET(req: NextRequest) {
+/** The photos a cover stands for (the cover first), for the lightbox to step through. */
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const repo = new PhotoIndexRepository(db());
-    const { searchParams } = req.nextUrl;
-    const cursor = searchParams.get("cursor") ?? undefined;
-    const limit = 50;
-
-    const { photos, nextCursor } = await repo.list({ limit, cursor });
-
-    const photosWithUrls = await Promise.all(
+    const { id } = await params;
+    const photos = await new PhotoIndexRepository(db()).group(id);
+    const withUrls = await Promise.all(
       photos.map(async (photo) => ({
         id: photo.id,
         takenAt: photo.takenAt.toISOString(),
@@ -21,13 +17,11 @@ export async function GET(req: NextRequest) {
           : null,
         width: photo.width,
         height: photo.height,
-        groupSize: photo.groupSize ?? null,
       }))
     );
-
-    return NextResponse.json({ photos: photosWithUrls, nextCursor });
+    return NextResponse.json({ photos: withUrls });
   } catch (err) {
-    console.error("[api/photos]", err);
+    console.error("[api/photos/group]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
 }
