@@ -2,12 +2,6 @@
 
 A self-hosted Google Takeout photo viewer. Drop Takeout ZIP archives into a Google Drive folder, trigger ingestion from the app, and browse a chronological photo timeline — all on GCP, accessible only to you.
 
-## Skills
-
-- [Engineering](./skills/engineering/README.md)
-  - [diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md): Disciplined diagnosis loop for hard bugs and performance regressions: build a feedback loop that goes red on this bug → minimise → hypothesise → instrument → fix → regression-test.
-- [Productivity](./skills/productivity/README.md)
-
 ## How it works
 
 ```
@@ -26,18 +20,22 @@ Google Drive folder
         ▼  (jobs.run, after a run that indexed new media)            ▼
    Compilation Job (Cloud Run Job, Python + ffmpeg)  ── reads staged media, the Photo Index
         └── Compilation (trip video)    ──► GCS Standard  + `compilations` in Firestore
+   Grouping Job (Cloud Run Job, Python + OpenCV)     ── reads Previews, the Photo Index
+        └── Similar Groups              ──► `grouped_under` / `group_size` in Firestore
 ```
 
-**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline, lightbox with prev/next, on-demand original download, ingestion trigger + status polling.
+**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline in day sections, with each group of similar photos shown as one cover tile with a "+N" badge; a lightbox with prev/next, a strip of the similar photos behind a cover (arrow up/down steps through it) and "Use as cover"; on-demand original download; ingestion trigger + status polling.
 
 **Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, and logs whether the ZIP was fully ingested (you then delete it from Drive). Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
 
 **Compilation Job** — Cloud Run Job, started by the Ingestion Job after a run that indexed new media. Finds Trips (runs of days more than 50 km from home, with video) and makes a Compilation for each Trip whose media changed: the best stretch of each clip, photos preferring clear faces, a chapter per day, captions, and public-domain music. Output keeps the footage's orientation and HDR. See [ADR 0001](docs/adr/0001-compilations-via-staging-and-a-job-started-by-ingestion.md).
 
+**Grouping Job** — Cloud Run Job (`theboss-photos-group`, run from the compile image), started by the Ingestion Job alongside the Compilation Job. Groups similar photos (bursts, retakes) behind a cover: every pair has perceptual hashes within 10 of 64 bits and the same number of clear faces, and the group spans at most 2 minutes. It measures only photos it hasn't yet, regroups all of them, and writes `grouped_under` (on the photos behind a cover), `group_size` (on the cover) and `cover_pinned` (a cover you chose) to the Photo Index. **Every file is kept; nothing is deleted.** Safe to repeat. See *Similar Group* in [CONTEXT.md](CONTEXT.md).
+
 ## Prerequisites
 
 - GCP project with billing enabled
-- Terraform 1.5+
+- Terraform 1.6+
 - `gcloud` CLI
 - Docker (for building container images)
 - Node.js 20+ and Python 3.11+
@@ -54,7 +52,7 @@ terraform apply \
   -var="drive_folder_id=<your-drive-folder-id>"
 ```
 
-This provisions: four GCS buckets (Standard for previews, staging and compilations; Archive for originals), Firestore database `photo-lib`, the Cloud Run service, the ingestion and compilation jobs, the service account, and IAP.
+This provisions: four GCS buckets (Standard for previews, staging and compilations; Archive for originals), Firestore database `photo-lib`, the Cloud Run service, the ingestion, compilation and grouping jobs, the service account, and IAP.
 
 ### Cost attribution and analysis
 
@@ -129,20 +127,29 @@ The compilation image must be pushed before the first `terraform apply` that cre
 ### 3. Deploy
 
 ```bash
-# Re-apply Terraform to pick up the new images
-cd infra && terraform apply \
-  -var="iap_authorized_email=you@gmail.com" \
-  -var="drive_folder_id=<your-drive-folder-id>"
+cd infra && terraform apply   -var="iap_authorized_email=you@gmail.com"   -var="drive_folder_id=<your-drive-folder-id>"
 ```
 
 The app URL is printed as a Terraform output. IAP will prompt for your Google account on first access.
+
+Every image uses the `:latest` tag, so `terraform apply` does **not** roll out a rebuilt image (the configuration doesn't change). After pushing new images, point the service and jobs at them:
+
+```bash
+R="--region us-central1 --project photolib-405112"
+gcloud run services update theboss-photos $R --image gcr.io/photolib-405112/theboss-photos@sha256:<digest>
+gcloud run jobs update theboss-photos-ingest $R --image gcr.io/photolib-405112/theboss-photos-ingest@sha256:<digest>
+gcloud run jobs update theboss-photos-compile $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
+gcloud run jobs update theboss-photos-group $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
+```
+
+Each `docker push` prints its digest. Terraform state is in the `photolib-405112-tfstate` bucket; run Terraform as your own Google account, since the app service account can't read it. To group an existing library the first time (or after changing the grouping rules), run `gcloud run jobs execute theboss-photos-group --region us-central1`.
 
 ## Usage
 
 1. **Export your photos** from [Google Takeout](https://takeout.google.com). Choose Google Photos, ZIP format.
 2. **Upload the ZIP files** to the Google Drive folder whose ID you passed to Terraform.
 3. **Open the app** and click **Start Ingestion**. A status badge shows Running → Done / Failed.
-4. **Browse** the timeline. Scroll to load more. Click a photo for the lightbox. Use the download button to retrieve the full-resolution original.
+4. **Browse** the timeline. Scroll to load more; photos are grouped by day, and similar photos show as one cover with a "+N" badge. Click a photo for the lightbox; on a cover, pick any of the similar photos in the strip and click **Use as cover** to change which one the timeline shows. Use the download button to retrieve the full-resolution original.
 
 Ingestion is safe to re-run — already-indexed photos are skipped. Processed ZIPs stay in Drive: the service account can't delete files you own in a My Drive folder, so delete them yourself once the archive summary in the job logs says `fully ingested` (an archive that is `kept` still has files without a Sidecar, usually because another part of the export is missing).
 
@@ -176,7 +183,7 @@ gcloud auth application-default login --impersonate-service-account=theboss-phot
 
 For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, and the impersonated service account must be able to read the Drive folder and files. Local Compose leaves processed ZIPs in Drive by default, so it does not need delete permission. You can enable deletion by setting `DELETE_PROCESSED_DRIVE_FILES=true` on the `ingest` service in `compose.yaml`; the service account must then have permission to delete the files (Shared Drive files may require the Content manager role).
 
-**Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes `grouped_under`/`group_size` fields only; no file is deleted. In Cloud Run the ingestion job starts `theboss-photos-group` after a run that indexed anything; to group an existing library once, run `gcloud run jobs execute theboss-photos-group --region us-central1`.
+**Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes grouping fields only; no file is deleted. Leave `GROUP_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 
 **Compilations locally:** set `STAGING_BUCKET` in `.env` to stage new media during local ingestion, and `COMPILATIONS_BUCKET` to run the Compilation Job with `docker compose run --rm compile`. It reads the real Photo Index and buckets, and writes real Compilations. Leave `COMPILE_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 
@@ -227,9 +234,11 @@ GCP_REGION=us-central1
 ```
 infra/          Terraform — GCS, Firestore, Cloud Run, IAP, IAM
 jobs/ingest/    Python ingestion job + pytest tests
+jobs/compile/   Python Compilation Job and Grouping Job + pytest tests
 app/            Next.js app (API routes + React frontend)
 docs/
   prd-001-google-photos-viewer.md   Full product spec
+  adr/                              Architecture decision records
   agents/                           Agent skill configuration
 CONTEXT.md      Domain glossary
 ```
