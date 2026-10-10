@@ -151,6 +151,8 @@ Each `docker push` prints its digest. Terraform state is in the `photolib-405112
 3. **Open the app** and click **Start Ingestion**. A status badge shows Running → Done / Failed.
 4. **Browse** the timeline. Scroll to load more; photos are grouped by day, and similar photos show as one cover with a "+N" badge. Click a photo for the lightbox; on a cover, pick any of the similar photos in the strip and click **Use as cover** to change which one the timeline shows. Use the download button to retrieve the full-resolution original.
 
+Ingestion also keeps an **Ingestion Ledger** in Firestore (`takeout_problems`, `takeout_exports`): every file it could not index, and which `Photos from YYYY` years each Takeout export contained. Archives ingested before the ledger existed have no entries; re-run ingestion over their ZIPs to fill it in (indexed files are skipped, so it is cheap). See [ADR 0002](docs/adr/0002-google-photos-deletion-is-manual.md).
+
 Ingestion is safe to re-run — already-indexed photos are skipped. Processed ZIPs stay in Drive: the service account can't delete files you own in a My Drive folder, so delete them yourself once the archive summary in the job logs says `fully ingested` (an archive that is `kept` still has files without a Sidecar, usually because another part of the export is missing).
 
 ## Development
