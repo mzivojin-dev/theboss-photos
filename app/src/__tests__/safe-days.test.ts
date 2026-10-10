@@ -1,10 +1,10 @@
-import { buildCleanupReport, CleanupInput, daysInRange } from "@/lib/safe-days";
+import { buildCleanupReport, CleanupInput, daysInRange, planDeletion } from "@/lib/safe-days";
 
-const photo = (day: string, path = `${day}.jpg`) => ({ takenAt: new Date(`${day}T12:00:00Z`), originalGcsPath: path });
+const photo = (day: string, path = `${day}.jpg`) => ({ id: `id-${path}`, filename: path, takenAt: new Date(`${day}T12:00:00Z`), originalGcsPath: path });
 
 const input = (overrides: Partial<CleanupInput> = {}): CleanupInput => ({
   photos: [],
-  exports: [{ exportedAt: new Date("2026-10-05T23:27:35Z"), years: [2026] }],
+  exports: [{ id: "E1", exportedAt: new Date("2026-10-05T23:27:35Z"), years: [2026] }],
   problems: [],
   originalNames: new Set(),
   deletedDays: new Set(),
@@ -66,8 +66,8 @@ describe("buildCleanupReport", () => {
     const report = buildCleanupReport(
       withOriginals(["2026-10-06"], {
         exports: [
-          { exportedAt: new Date("2026-10-05T00:00:00Z"), years: [2026] },
-          { exportedAt: new Date("2026-10-20T00:00:00Z"), years: [2026] },
+          { id: "E1", exportedAt: new Date("2026-10-05T00:00:00Z"), years: [2026] },
+          { id: "E2", exportedAt: new Date("2026-10-20T00:00:00Z"), years: [2026] },
         ],
       })
     );
@@ -109,7 +109,7 @@ describe("buildCleanupReport", () => {
 
   it("counts an item stored on YouTube as present", () => {
     const report = buildCleanupReport(
-      input({ photos: [{ takenAt: new Date("2026-03-02T00:00:00Z"), youtubeVideoId: "abc" }] })
+      input({ photos: [{ id: "v", filename: "v.mp4", takenAt: new Date("2026-03-02T00:00:00Z"), youtubeVideoId: "abc" }] })
     );
 
     expect(report.safeRanges).toHaveLength(1);
@@ -134,5 +134,49 @@ describe("buildCleanupReport", () => {
 describe("daysInRange", () => {
   it("lists every day from start to end", () => {
     expect(daysInRange("2026-02-27", "2026-03-02")).toEqual(["2026-02-27", "2026-02-28", "2026-03-01", "2026-03-02"]);
+  });
+});
+
+describe("planDeletion", () => {
+  const days = ["2026-03-01", "2026-03-02", "2026-03-03"];
+
+  it("records the items, counts and evidence of a safe range", () => {
+    const base = withOriginals(days, { problems: [problemOn("2026-06-01")] });
+
+    const plan = planDeletion(base, "2026-03-01", "2026-03-02");
+
+    expect(plan).toEqual({
+      ok: true,
+      entry: expect.objectContaining({
+        start: "2026-03-01",
+        end: "2026-03-02",
+        itemCount: 2,
+        days: { "2026-03-01": 1, "2026-03-02": 1 },
+        items: [
+          { id: "id-2026-03-01.jpg", filename: "2026-03-01.jpg", day: "2026-03-01", original: "2026-03-01.jpg" },
+          { id: "id-2026-03-02.jpg", filename: "2026-03-02.jpg", day: "2026-03-02", original: "2026-03-02.jpg" },
+        ],
+        exports: [{ id: "E1", exportedAt: new Date("2026-10-05T23:27:35Z"), years: [2026] }],
+        unresolvedProblems: 1,
+        originalsListed: 3,
+      }),
+    });
+  });
+
+  it("refuses a range containing a day that is not safe", () => {
+    const base = withOriginals(days);
+    base.originalNames = new Set(["2026-03-01.jpg", "2026-03-03.jpg"]);
+
+    expect(planDeletion(base, "2026-03-01", "2026-03-03").ok).toBe(false);
+  });
+
+  it("refuses a range that has no safe days", () => {
+    expect(planDeletion(withOriginals(["2025-01-01"]), "2025-01-01", "2025-01-01").ok).toBe(false);
+  });
+
+  it("leaves out days already marked deleted", () => {
+    const plan = planDeletion(withOriginals(days, { deletedDays: new Set(["2026-03-02"]) }), "2026-03-01", "2026-03-03");
+
+    expect(plan).toEqual({ ok: true, entry: expect.objectContaining({ itemCount: 2, days: { "2026-03-01": 1, "2026-03-03": 1 } }) });
   });
 });

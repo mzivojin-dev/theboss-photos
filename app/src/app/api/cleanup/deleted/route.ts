@@ -12,8 +12,9 @@ export async function POST(req: NextRequest) {
     if ((Date.parse(end) - Date.parse(start)) / 86_400_000 >= MAX_RANGE_DAYS) {
       return NextResponse.json({ error: "Range is too long" }, { status: 400 });
     }
-    const days = await new CleanupRepository(db(), originalsBucket()).markDeleted(start, end);
-    return NextResponse.json({ days });
+    const result = await new CleanupRepository(db(), originalsBucket()).markDeleted(start, end);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
+    return NextResponse.json({ logId: result.logId, days: result.days });
   } catch (err) {
     console.error("[api/cleanup/deleted]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

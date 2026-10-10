@@ -5,12 +5,15 @@
  */
 
 export interface PhotoFact {
+  id: string;
+  filename: string;
   takenAt: Date;
   originalGcsPath?: string | null;
   youtubeVideoId?: string | null;
 }
 
 export interface ExportFact {
+  id: string;
   exportedAt: Date;
   years: number[];
 }
@@ -135,4 +138,61 @@ function unsafeReasons(
   if (missing) reasons.push("original_missing");
 
   return reasons;
+}
+
+export interface AuditItem {
+  id: string;
+  filename: string;
+  day: string;
+  original: string | null;
+}
+
+/** What is recorded when a range is marked deleted: the evidence that it was safe at that moment. */
+export interface AuditEntry {
+  start: string;
+  end: string;
+  itemCount: number;
+  days: Record<string, number>; // items per day
+  items: AuditItem[];
+  exports: { id: string; exportedAt: Date; years: number[] }[]; // the exports that covered the range's years
+  unresolvedProblems: number; // open problems in the whole ledger at that moment
+  originalsListed: number; // objects in the originals bucket at that moment
+}
+
+export type DeletionPlan = { ok: true; entry: AuditEntry } | { ok: false; error: string };
+
+/**
+ * Re-checks a range against the current data before it is marked deleted. The range must lie inside
+ * one safe range, so a stale page can't mark a day that has become unsafe since it was loaded.
+ */
+export function planDeletion(input: CleanupInput, start: string, end: string): DeletionPlan {
+  const report = buildCleanupReport(input);
+  if (!report.safeRanges.some((r) => r.start <= start && end <= r.end)) {
+    return { ok: false, error: "This range is not entirely safe to delete any more; reload the list" };
+  }
+
+  const items: AuditItem[] = [];
+  const days: Record<string, number> = {};
+  for (const photo of input.photos) {
+    const day = dayOf(photo.takenAt);
+    if (day < start || day > end || input.deletedDays.has(day)) continue;
+    days[day] = (days[day] ?? 0) + 1;
+    items.push({ id: photo.id, filename: photo.filename, day, original: photo.originalGcsPath ?? null });
+  }
+  items.sort((a, b) => a.day.localeCompare(b.day) || a.id.localeCompare(b.id));
+
+  const years = new Set(daysInRange(start, end).map((d) => Number(d.slice(0, 4))));
+  return {
+    ok: true,
+    entry: {
+      start,
+      end,
+      itemCount: items.length,
+      days,
+      items,
+      exports: input.exports.filter((e) => e.years.some((y) => years.has(y))).map(({ id, exportedAt, years }) => ({ id, exportedAt, years })),
+      unresolvedProblems: input.problems.length,
+      originalsListed: input.originalNames.size,
+    },
+  };
 }

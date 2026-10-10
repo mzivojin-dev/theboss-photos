@@ -75,6 +75,8 @@ Out of scope for MVP: albums, map view, search, face/object tagging, video playb
 
 **cleanup_days** — One document per day (id `YYYY-MM-DD`) the user has marked deleted in Google Photos; such days drop off the Safe Day list.
 
+**cleanup_log** — The audit trail of Google Photos cleanup: one document per "Deleted in Google Photos" press, written before the days are marked and never updated by the app. Holds `start`, `end`, `marked_at`, `itemCount`, items per day, the exports that covered the range (id, `exported_at`, years), the number of unresolved problems and of objects in the originals bucket at that moment. Every item (id, filename, day, Original path) is in the `items` subcollection, in chunks of 500. The server re-checks that the whole range is still safe before writing it. `cleanup_days` documents carry the `log_id` of the entry that marked them. Read one with `GET /api/cleanup/log/<id>`.
+
 **Compilations** — Firestore collection with one document per Trip, keyed `<first day>_<last day>`: status (`rendering`, `ready`, `skipped`, `failed`, `superseded`), the membership hash of the Trip's media (a Compilation is made again when it changes), attempts (a Trip is given up after 2 failed or killed attempts, until its media changes), title, dates, chapters, music credits and the video's path in the compilations bucket.
 
 **Deduplication** — At ingestion time, each photo's `google_photos_id` is checked against the Photo Index before writing. Photos already present are skipped. Prevents duplicate entries when re-ingesting overlapping Takeout Archives.

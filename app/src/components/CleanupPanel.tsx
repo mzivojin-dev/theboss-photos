@@ -5,7 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 interface SafeRange { start: string; end: string; itemCount: number }
 interface UnsafeDay { day: string; itemCount: number; reasons: string[] }
 interface Problem { kind: string; path: string; reason: string }
+interface HistoryEntry { id: string; start: string; end: string; itemCount: number; markedAt: string }
 interface Report {
+  history: HistoryEntry[];
   safeRanges: SafeRange[];
   unsafeDays: UnsafeDay[];
   undatedProblems: Problem[];
@@ -116,7 +118,20 @@ export default function CleanupPanel() {
             ))}
           </details>
 
-          <p style={muted}>{report.deletedDays.length} days already marked deleted.</p>
+          <details style={section}>
+            <summary>History ({report.history.length} entries, {report.deletedDays.length} days marked deleted)</summary>
+            <p style={muted}>
+              Each entry is an audit record written when you marked a range: the items in it and the exports and
+              bucket listing that showed it was safe. Open one to see every file.
+            </p>
+            {report.history.map((entry) => (
+              <div key={entry.id} style={{ padding: "0.25rem 0" }}>
+                {new Date(entry.markedAt).toLocaleString()} · {entry.start === entry.end ? entry.start : `${entry.start} → ${entry.end}`}
+                <span style={muted}> · {entry.itemCount} items · </span>
+                <a href={`/api/cleanup/log/${entry.id}`} target="_blank" rel="noreferrer">details</a>
+              </div>
+            ))}
+          </details>
         </>
       )}
     </div>
