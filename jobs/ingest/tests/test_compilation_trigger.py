@@ -3,7 +3,7 @@ Tests for compilation_trigger: the Compilation Job is started once after a run t
 """
 import pytest
 
-from src.compilation_trigger import CloudRunJob, CompilationTrigger
+from src.compilation_trigger import CloudRunJob, CompilationTrigger, start_all
 from src.index_outcome import IndexResult, Outcome
 
 
@@ -73,3 +73,20 @@ def test_the_cloud_run_job_is_started_through_the_admin_api():
         "https://run.googleapis.com/v2/projects/photolib-405112/locations/us-central1/jobs/theboss-photos-compile:run",
         {},
     )
+
+
+def test_every_job_is_started_even_when_an_earlier_one_fails_to_start():
+    started = []
+
+    def failing():
+        raise OSError("403 Forbidden")
+
+    start = start_all([failing, lambda: started.append("compile")])
+
+    try:
+        start()
+    except OSError:
+        pass
+    else:
+        raise AssertionError("the failure should be raised")
+    assert started == ["compile"]

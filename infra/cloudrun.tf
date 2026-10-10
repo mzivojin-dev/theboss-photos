@@ -94,6 +94,10 @@ resource "google_cloud_run_v2_job" "ingest" {
           value = google_cloud_run_v2_job.compile.name
         }
         env {
+          name  = "GROUP_JOB_NAME"
+          value = google_cloud_run_v2_job.group.name
+        }
+        env {
           name  = "GCP_REGION"
           value = var.region
         }
@@ -153,6 +157,46 @@ resource "google_cloud_run_v2_job" "compile" {
           limits = {
             cpu    = "8"
             memory = "16Gi"
+          }
+        }
+      }
+    }
+  }
+}
+
+# Groups similar photos behind a cover (see "Similar Group" in CONTEXT.md). Runs from the compile
+# image, which has the face detector. Started by the ingestion job after a run that indexed new
+# media; measures only photos it hasn't yet, so reruns are cheap.
+resource "google_cloud_run_v2_job" "group" {
+  name     = "theboss-photos-group"
+  location = var.region
+  labels   = local.cost_labels
+
+  template {
+    labels = local.cost_labels
+
+    template {
+      service_account = google_service_account.app.email
+      timeout         = "3600s"
+      max_retries     = 1
+
+      containers {
+        image   = "gcr.io/${var.project_id}/theboss-photos-compile:latest"
+        command = ["python", "-m", "src.group_main"]
+
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.project_id
+        }
+        env {
+          name  = "PREVIEWS_BUCKET"
+          value = google_storage_bucket.previews.name
+        }
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
           }
         }
       }
