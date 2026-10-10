@@ -24,6 +24,7 @@ from googleapiclient.errors import HttpError
 from .compilation_trigger import CloudRunJob, CompilationTrigger, start_all
 from .drive_zip_streamer import DriveZipStreamer
 from .gcs_blob_store import GcsBlobStore
+from .ingestion_ledger import FirestoreIngestionLedger
 from .media_indexer import MediaIndexer
 from .photo_index_repository import PhotoIndexRepository
 from .takeout_ingestion import TakeoutArchive, ingest_archives
@@ -191,7 +192,8 @@ def run() -> None:
         start_all([CloudRunJob(auth_session, PROJECT_ID, GCP_REGION, name).start for name in job_names])
         if job_names else None
     )
-    ingest_archives(archives, compilation.counting(indexer.index), archive_fully_ingested)
+    ingest_archives(archives, compilation.counting(indexer.index), archive_fully_ingested,
+                    ledger=FirestoreIngestionLedger(db))
     compilation.after_run()
 
     log.info("Ingestion complete.")

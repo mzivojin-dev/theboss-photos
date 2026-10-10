@@ -20,6 +20,9 @@ A Cloud Run Job that reads Takeout Archives from Google Drive via byte-range req
 **Media Indexer**
 The part of the Ingestion Job that indexes one media file (photo or video) from a Takeout Archive, given its Sidecar metadata: it skips files already in the Photo Index, writes the Original and (for photos) the Preview Image, then writes the Photo Index document last, so a document's presence means the file is fully indexed.
 
+**Ingestion Ledger**
+What ingestion could not index and what each Takeout export covered, written by the Ingestion Job to Firestore. `takeout_problems` has one document per media file that was not indexed (`failed`, `no_sidecar` or `bad_sidecar`), resolved when a later run indexes the file. `takeout_exports` has one document per export (the timestamp in the archive name) with `exported_at` and the `Photos from YYYY` years seen across its archives; a year folder is all-or-nothing in Takeout, so a listed year was exported whole. The app reads it to decide which days are safe to delete from Google Photos. Archives ingested before the ledger existed have no entries until their ZIPs are run through ingestion again.
+
 **Staging**
 A Standard-storage GCS bucket where the Ingestion Job copies each newly indexed video, and a 1920px JPEG of each photo, while it has the bytes in memory. Lets the Compilation Job read media without Archive retrieval. Copies expire after 30 days.
 
