@@ -1,6 +1,7 @@
 """
-Starts the Compilation Job (and the photo grouping job) once an ingestion run has indexed new media, so trips get their
-Compilations without anyone pressing a button. One start per run, however much was indexed.
+Starts the Compilation Job, and the job that groups similar photos, once an ingestion run has indexed
+new media, so trips get their Compilations and the timeline its Similar Groups without anyone pressing
+a button. One start per run, however much was indexed.
 """
 import logging
 import threading
@@ -37,6 +38,7 @@ def start_all(starts: list[Callable[[], None]]) -> Callable[[], None]:
             try:
                 start_job()
             except Exception as err:
+                log.error("Could not start a job: %s", err)
                 failures.append(err)
         if failures:
             raise failures[0]

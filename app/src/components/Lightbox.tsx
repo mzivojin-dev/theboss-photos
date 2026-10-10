@@ -1,33 +1,30 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-
-export interface Photo {
-  id: string;
-  takenAt: string;
-  previewUrl: string | null;
-  width: number | null;
-  height: number | null;
-  /** On a group's cover: how many similar photos it stands for, itself included. */
-  groupSize?: number | null;
-}
+import type { Photo } from "@/lib/photo";
 
 interface Props {
   photos: Photo[];
   initialIndex: number;
   onClose: () => void;
+  /** The user made `photo` the cover of the group whose cover was `oldCoverId`. */
+  onCoverChanged: (oldCoverId: string, photo: Photo) => void;
 }
 
 /** Steps through the timeline; a cover also shows the similar photos behind it as a strip. */
-export default function Lightbox({ photos, initialIndex, onClose }: Props) {
+export default function Lightbox({ photos, initialIndex, onClose, onCoverChanged }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [groups, setGroups] = useState<Record<string, Photo[]>>({});
   const [picked, setPicked] = useState(0);
-  const requested = useRef(new Set<string>());
+  const [failed, setFailed] = useState<string | null>(null); // the cover whose group couldn't be loaded
+  const [attempt, setAttempt] = useState(0);
+  const [pinning, setPinning] = useState(false);
+  const memberCount = useRef(0);
   const photo = photos[index];
   const isGroup = (photo.groupSize ?? 0) > 1;
-  const members = isGroup ? groups[photo.id] : undefined;
+  const members = isGroup ? groups[photo.id]?.filter((m) => m.previewUrl) : undefined;
   const shown = members?.[picked] ?? photo;
+  memberCount.current = members?.length ?? 0;
 
   const go = (to: number) => {
     setIndex(Math.min(photos.length - 1, Math.max(0, to)));
@@ -42,6 +39,10 @@ export default function Lightbox({ photos, initialIndex, onClose }: Props) {
       } else if (e.key === "ArrowRight") {
         setIndex((i) => Math.min(photos.length - 1, i + 1));
         setPicked(0);
+      } else if (e.key === "ArrowDown") {
+        setPicked((i) => Math.min(memberCount.current - 1, i + 1));
+      } else if (e.key === "ArrowUp") {
+        setPicked((i) => Math.max(0, i - 1));
       } else if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
@@ -49,13 +50,37 @@ export default function Lightbox({ photos, initialIndex, onClose }: Props) {
   }, [photos.length, onClose]);
 
   useEffect(() => {
-    if (!isGroup || requested.current.has(photo.id)) return;
-    requested.current.add(photo.id);
+    if (!isGroup || groups[photo.id]) return;
+    let current = true;
+    setFailed(null);
     fetch(`/api/photos/${photo.id}/group`)
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((data) => setGroups((prev) => ({ ...prev, [photo.id]: data.photos })))
-      .catch((err) => console.error("[Lightbox] group fetch failed", err));
-  }, [photo.id, isGroup]);
+      .then((data) => current && setGroups((prev) => ({ ...prev, [photo.id]: data.photos })))
+      .catch((err) => {
+        console.error("[Lightbox] group fetch failed", err);
+        if (current) setFailed(photo.id);
+      });
+    return () => { current = false; };
+  }, [photo.id, isGroup, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const useAsCover = async () => {
+    setPinning(true);
+    try {
+      const res = await fetch(`/api/photos/${shown.id}/cover`, { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const { photo: cover } = await res.json();
+      setGroups((prev) => {
+        const { [photo.id]: _old, ...rest } = prev;
+        return rest;
+      });
+      setPicked(0);
+      onCoverChanged(photo.id, cover);
+    } catch (err) {
+      console.error("[Lightbox] could not change the cover", err);
+    } finally {
+      setPinning(false);
+    }
+  };
 
   // Warm the neighbours so stepping is instant.
   useEffect(() => {
@@ -87,11 +112,11 @@ export default function Lightbox({ photos, initialIndex, onClose }: Props) {
         )}
 
         {isGroup && (
-          <div style={{ display: "flex", gap: 6, justifyContent: "center", padding: "10px 0 0", overflowX: "auto" }}>
+          <div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center", padding: "10px 0 0", overflowX: "auto" }}>
             {(members ?? []).map((m, i) => (
               <img
                 key={m.id}
-                src={m.previewUrl ?? ""}
+                src={m.previewUrl!}
                 alt=""
                 onClick={() => setPicked(i)}
                 style={{
@@ -101,7 +126,19 @@ export default function Lightbox({ photos, initialIndex, onClose }: Props) {
                 }}
               />
             ))}
-            {!members && <span style={{ color: "#888", fontSize: "0.8rem" }}>Loading similar photos…</span>}
+            {!members && failed !== photo.id && (
+              <span style={{ color: "#888", fontSize: "0.8rem" }}>Loading similar photos…</span>
+            )}
+            {!members && failed === photo.id && (
+              <button onClick={() => setAttempt((n) => n + 1)} style={btnStyle}>
+                Couldn&rsquo;t load similar photos. Try again
+              </button>
+            )}
+            {members && picked > 0 && (
+              <button onClick={useAsCover} disabled={pinning} style={{ ...btnStyle, marginLeft: 8, flexShrink: 0 }}>
+                Use as cover
+              </button>
+            )}
           </div>
         )}
 

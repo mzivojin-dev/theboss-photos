@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import Lightbox, { Photo } from "./Lightbox";
+import Lightbox from "./Lightbox";
+import type { Photo } from "@/lib/photo";
 
 const ROW_HEIGHT = 220;
 
@@ -133,6 +134,8 @@ export default function Timeline() {
           photos={photos}
           initialIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
+          onCoverChanged={(oldCoverId, cover) =>
+            setPhotos((prev) => prev.map((p) => (p.id === oldCoverId ? cover : p)))}
         />
       )}
     </>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PhotoIndexRepository } from "@/lib/photo-index-repository";
-import { generateSignedPreviewUrl } from "@/lib/gcs";
-import { db, previewsBucket } from "@/lib/gcp-clients";
+import { toPhotoDto } from "@/lib/photo-dto";
+import { db } from "@/lib/gcp-clients";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,20 +12,7 @@ export async function GET(req: NextRequest) {
 
     const { photos, nextCursor } = await repo.list({ limit, cursor });
 
-    const photosWithUrls = await Promise.all(
-      photos.map(async (photo) => ({
-        id: photo.id,
-        takenAt: photo.takenAt.toISOString(),
-        previewUrl: photo.previewGcsPath
-          ? await generateSignedPreviewUrl(photo.previewGcsPath, previewsBucket())
-          : null,
-        width: photo.width,
-        height: photo.height,
-        groupSize: photo.groupSize ?? null,
-      }))
-    );
-
-    return NextResponse.json({ photos: photosWithUrls, nextCursor });
+    return NextResponse.json({ photos: await Promise.all(photos.map(toPhotoDto)), nextCursor });
   } catch (err) {
     console.error("[api/photos]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

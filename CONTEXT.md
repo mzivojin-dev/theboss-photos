@@ -33,7 +33,10 @@ An edited video of one Trip: the best stretch of each clip (loud, some movement,
 A Cloud Run Job that makes a Compilation for each Trip whose media changed since its last one. Started by the Ingestion Job after a run that indexed new media. No AI: highlights come from ffmpeg measurements and photos are ranked by face detection.
 
 **Similar Group**
-Photos taken within 2 minutes of each other whose perceptual hashes differ in at most 10 of 64 bits and that have the same number of clear faces (bursts, retakes). One photo is the cover (clear faces, then sharpness, then exposure); the Timeline shows the cover alone with a "+N" badge, and the Lightbox shows the rest as a strip. Every file is kept; nothing is deleted. Recorded in the Photo Index as `grouped_under` (on each photo behind the cover) and `group_size` (on the cover), with the measurements in `similar_*` fields. Written by the grouping job (`python -m src.group_main` in `jobs/compile`), which measures only photos it hasn't yet and regroups all.
+Photos that are all alike (every pair has perceptual hashes within 10 of 64 bits and the same number of clear faces) and were taken within 2 minutes of the group's first photo: bursts, retakes. One photo is the cover (clear faces, then sharpness, then exposure, or the one the user chose with "Use as cover"); the Timeline shows the cover alone with a "+N" badge, and the Lightbox shows the rest as a strip. Every file is kept; nothing is deleted. Recorded in the Photo Index as `grouped_under` (on each photo behind the cover) and `group_size` (on the cover), `cover_pinned` (on a cover the user chose), and the measurements in `similar_*` fields.
+
+**Grouping Job**
+Measures photos not measured yet, then regroups all of them into Similar Groups (`python -m src.group_main` in `jobs/compile`; Cloud Run job `theboss-photos-group`, from the compile image). Started by the Ingestion Job after a run that indexed anything. Safe to repeat and to overlap (it recomputes from the stored measurements). A photo it can't measure is shown on its own. Photos are un-hidden before others are hidden, so an interrupted run never leaves a photo hidden behind a missing cover.
 
 **Drive Folder**
 A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job, and removed by the user once fully ingested: the service account can't delete files the user owns.
@@ -50,7 +53,7 @@ A designated Google Drive folder owned by a single Google account (personal use)
 
 ## Timeline UX
 
-Infinite scroll, sectioned by local day — loads 50 Timeline tiles per batch ordered by `taken_at` descending. Photos hidden behind a Similar Group's cover are skipped. Next batch triggered automatically when user scrolls to the bottom. Uses Firestore cursor pagination internally.
+Infinite scroll, sectioned by local day — loads up to 50 Timeline tiles per batch ordered by `taken_at` descending. Photos hidden behind a Similar Group's cover are skipped. Next batch triggered automatically when user scrolls to the bottom. Uses Firestore cursor pagination internally.
 
 ## MVP Scope
 
