@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CleanupRepository, isValidDay, MAX_RANGE_DAYS } from "@/lib/cleanup-repository";
-import { db, originalsBucket } from "@/lib/gcp-clients";
+import { isValidDay, MAX_RANGE_DAYS } from "@/lib/cleanup-repository";
+import { cleanupStore } from "@/lib/cleanup-store";
 
 /** Records that a range of days was deleted in Google Photos, so it drops off the safe list. */
 export async function POST(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     if ((Date.parse(end) - Date.parse(start)) / 86_400_000 >= MAX_RANGE_DAYS) {
       return NextResponse.json({ error: "Range is too long" }, { status: 400 });
     }
-    const result = await new CleanupRepository(db(), originalsBucket()).markDeleted(start, end);
+    const result = await cleanupStore().markDeleted(start, end);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
     return NextResponse.json({ logId: result.logId, days: result.days });
   } catch (err) {

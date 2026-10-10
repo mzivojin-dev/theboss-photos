@@ -25,6 +25,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Cleanup page with sample data and no Google access: docker compose --profile demo up --build app-demo
+  # then open http://localhost:3001/cleanup. Changes live in memory until the container stops.
+  app-demo:
+    profiles: ["demo"]
+    build:
+      context: ./app
+    ports:
+      - "3001:3000"
+    environment:
+      CLEANUP_FAKE_DATA: "true"
+
   ingest:
     build:
       context: ./jobs/ingest

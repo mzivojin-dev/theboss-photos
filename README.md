@@ -185,6 +185,8 @@ gcloud auth application-default login --impersonate-service-account=theboss-phot
 
 For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, and the impersonated service account must be able to read the Drive folder and files. Local Compose leaves processed ZIPs in Drive by default, so it does not need delete permission. You can enable deletion by setting `DELETE_PROCESSED_DRIVE_FILES=true` on the `ingest` service in `compose.yaml`; the service account must then have permission to delete the files (Shared Drive files may require the Content manager role).
 
+**Cleanup page with sample data:** `docker compose --profile demo up --build app-demo`, then open http://localhost:3001/cleanup. It uses `CLEANUP_FAKE_DATA=true`: an in-memory store with sample photos, an export, problems and a bucket listing, and needs no Google credentials. Marking a range deleted works (including the audit history) but is forgotten when the container stops.
+
 **Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes grouping fields only; no file is deleted. Leave `GROUP_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 
 **Compilations locally:** set `STAGING_BUCKET` in `.env` to stage new media during local ingestion, and `COMPILATIONS_BUCKET` to run the Compilation Job with `docker compose run --rm compile`. It reads the real Photo Index and buckets, and writes real Compilations. Leave `COMPILE_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.

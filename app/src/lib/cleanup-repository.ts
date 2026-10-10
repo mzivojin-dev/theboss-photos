@@ -31,8 +31,15 @@ function serialize(value: any): any {
   return value;
 }
 
+/** What the cleanup routes need; the demo mode (CLEANUP_FAKE_DATA) supplies an in-memory one. */
+export interface CleanupStore {
+  report(): Promise<CleanupReport & { history: HistoryEntry[] }>;
+  markDeleted(start: string, end: string): Promise<{ ok: true; logId: string; days: number } | { ok: false; error: string }>;
+  logEntry(id: string): Promise<unknown | null>;
+}
+
 /** Reads the Photo Index, the Ingestion Ledger and the originals bucket for the cleanup page. */
-export class CleanupRepository {
+export class CleanupRepository implements CleanupStore {
   constructor(private db: FirebaseFirestore.Firestore, private originals: Bucket) {}
 
   async report(): Promise<CleanupReport & { history: HistoryEntry[] }> {
