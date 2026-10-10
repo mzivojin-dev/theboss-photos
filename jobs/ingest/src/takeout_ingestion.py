@@ -6,10 +6,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Optional
 
 from .drive_zip_streamer import DriveZipStreamer, ZipEntry
 from .index_outcome import IndexResult, Outcome
+from .ingestion_ledger import UNKNOWN_EXPORT, IngestionLedger, Problem, export_of, exported_at, year_of
 from .sidecar_index import SidecarIndex
 from .sidecar_parser import PhotoMetadata, parse as parse_sidecar
 
@@ -79,6 +80,7 @@ def ingest_archives(
     archives: list[TakeoutArchive],
     index_media: Callable[[ZipEntry, PhotoMetadata], IndexResult],
     archive_fully_ingested: Callable[[TakeoutArchive], None],
+    ledger: Optional[IngestionLedger] = None,
 ) -> None:
     # Takeout splits an export across archives, and a media file's Sidecar is often in a
     # different archive than the media itself, so collect every archive's Sidecars first.
@@ -91,6 +93,18 @@ def ingest_archives(
             (entry.name for entry in sidecar_entries),
             pool.map(lambda entry: entry.read(), sidecar_entries),
         )))
+
+    if ledger is not None:
+        _record_exports(ledger, archives)
+    unresolved = ledger.unresolved() if ledger is not None else set()
+
+    def record_problem(archive: TakeoutArchive, entry: ZipEntry, kind: str, reason: str,
+                       metadata: Optional[PhotoMetadata] = None) -> None:
+        if ledger is not None:
+            ledger.record_problem(Problem(
+                export=export_of(archive.name), archive=archive.name, path=entry.name, kind=kind,
+                reason=reason, taken_at=metadata.taken_at if metadata else None,
+            ))
 
     failure_streak = _FailureStreak(MAX_CONSECUTIVE_FAILURES)
 
@@ -108,6 +122,7 @@ def ingest_archives(
             if sidecar_bytes is None:
                 log.warning("No sidecar for %s — skipping", entry.name)
                 no_sidecar += 1
+                record_problem(archive, entry, "no_sidecar", "No Sidecar found")
                 continue
 
             try:
@@ -115,6 +130,7 @@ def ingest_archives(
             except ValueError as e:
                 log.warning("Sidecar parse error for %s: %s — skipping", entry.name, e)
                 bad_sidecar += 1
+                record_problem(archive, entry, "bad_sidecar", str(e))
                 continue
 
             matched.append((entry, metadata))
@@ -137,6 +153,13 @@ def ingest_archives(
                 f"Aborting ingestion: {MAX_CONSECUTIVE_FAILURES} media files in a row failed to index "
                 "(see the warnings above); this looks like a systemic problem such as credentials or permissions"
             )
+        for (entry, metadata), result in zip(matched, results):
+            if result is None:
+                continue
+            if result.outcome is Outcome.FAILED:
+                record_problem(archive, entry, "failed", result.reason or "", metadata)
+            elif ledger is not None and (export_of(archive.name), entry.name) in unresolved:
+                ledger.resolve(export_of(archive.name), entry.name)
         counts = {outcome: sum(result.outcome is outcome for result in results) for outcome in Outcome}
 
         # Keep an archive with unmatched, unparseable or failed media so deleting it can't lose those files.
@@ -149,3 +172,19 @@ def ingest_archives(
         )
         if not keep:
             archive_fully_ingested(archive)
+
+
+def _record_exports(ledger: IngestionLedger, archives: list[TakeoutArchive]) -> None:
+    """Merge what this run saw of each export into the ledger: its archives and its `Photos from YYYY` years."""
+    names: dict[str, set[str]] = {}
+    years: dict[str, set[int]] = {}
+    for archive in archives:
+        export = export_of(archive.name)
+        names.setdefault(export, set()).add(archive.name)
+        years.setdefault(export, set()).update(
+            year for entry in archive.streamer.list_entries() if (year := year_of(entry.name)) is not None
+        )
+    for export in names:
+        if export == UNKNOWN_EXPORT:
+            continue  # an archive not named like a Takeout export says nothing about what was exported
+        ledger.record_export(export, exported_at(export), names[export], years[export])

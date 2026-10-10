@@ -20,6 +20,12 @@ A Cloud Run Job that reads Takeout Archives from Google Drive via byte-range req
 **Media Indexer**
 The part of the Ingestion Job that indexes one media file (photo or video) from a Takeout Archive, given its Sidecar metadata: it skips files already in the Photo Index, writes the Original and (for photos) the Preview Image, then writes the Photo Index document last, so a document's presence means the file is fully indexed.
 
+**Ingestion Ledger**
+What ingestion could not index and what each Takeout export covered, written by the Ingestion Job to Firestore. `takeout_problems` has one document per media file that was not indexed (`failed`, `no_sidecar` or `bad_sidecar`), resolved when a later run indexes the file. `takeout_exports` has one document per export (the timestamp in the archive name) with `exported_at` and the `Photos from YYYY` years seen across its archives; a year folder is all-or-nothing in Takeout, so a listed year was exported whole. The app reads it to decide which days are safe to delete from Google Photos. Archives ingested before the ledger existed have no entries until their ZIPs are run through ingestion again.
+
+**Safe Day**
+A UTC day of `taken_at` whose photos can be deleted from Google Photos by hand: its year is in the `years` of a `takeout_exports` document, it is earlier than that export's `exported_at` date, no unresolved `takeout_problems` document has a `taken_at` within ±1 day, every Photo Index document on it has its Original in the originals bucket (one bucket listing; items on YouTube count as present), and it has at least one item. Consecutive Safe Days form a range (days with no media don't break it). The cleanup page (`/cleanup`, `GET /api/cleanup`) lists the ranges; "Deleted in Google Photos" stores a `cleanup_days` document per day (`POST /api/cleanup/deleted`). Residual risk: a photo taken before the export but added to Google Photos after it is in no archive.
+
 **Staging**
 A Standard-storage GCS bucket where the Ingestion Job copies each newly indexed video, and a 1920px JPEG of each photo, while it has the bytes in memory. Lets the Compilation Job read media without Archive retrieval. Copies expire after 30 days.
 
@@ -66,6 +72,10 @@ Out of scope for MVP: albums, map view, search, face/object tagging, video playb
 ## Data Store
 
 **Photo Index** — Cloud Firestore collection storing one document per photo or video, with `media_type` (`photo` | `video`), `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field). Queried for the timeline ordered by `taken_at`.
+
+**cleanup_days** — One document per day (id `YYYY-MM-DD`) the user has marked deleted in Google Photos; such days drop off the Safe Day list.
+
+**cleanup_log** — The audit trail of Google Photos cleanup: one document per "Deleted in Google Photos" press, written before the days are marked and never updated by the app. Holds `start`, `end`, `marked_at`, `itemCount`, items per day, the exports that covered the range (id, `exported_at`, years), the number of unresolved problems and of objects in the originals bucket at that moment. Every item (id, filename, day, Original path) is in the `items` subcollection, in chunks of 500. The server re-checks that the whole range is still safe before writing it. `cleanup_days` documents carry the `log_id` of the entry that marked them. Read one with `GET /api/cleanup/log/<id>`.
 
 **Compilations** — Firestore collection with one document per Trip, keyed `<first day>_<last day>`: status (`rendering`, `ready`, `skipped`, `failed`, `superseded`), the membership hash of the Trip's media (a Compilation is made again when it changes), attempts (a Trip is given up after 2 failed or killed attempts, until its media changes), title, dates, chapters, music credits and the video's path in the compilations bucket.
 

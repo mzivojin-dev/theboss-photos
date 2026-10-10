@@ -264,3 +264,114 @@ def test_ingestion_does_not_load_the_imaging_stack():
     ).stdout
     assert "'PIL'" not in loaded
     assert "'pillow_heif'" not in loaded
+
+
+# --- Ingestion Ledger ---
+
+from datetime import datetime, timezone
+
+from tests.in_memory_adapters import InMemoryIngestionLedger
+
+YEAR_DIR = "Takeout/Google Photos/Photos from 2026"
+EXPORT = "20261005T232735Z"
+
+
+def _ingest_with_ledger(archives, ledger, index_media=lambda entry, metadata: _indexed()):
+    ingest_archives(archives, index_media, lambda archive: None, ledger=ledger)
+
+
+def test_a_file_without_a_sidecar_is_recorded_as_a_problem():
+    ledger = InMemoryIngestionLedger()
+
+    _ingest_with_ledger([_archive(f"takeout-{EXPORT}-1-001.zip", {f"{YEAR_DIR}/IMG_2.jpg": b"jpeg"})], ledger)
+
+    problem = ledger.problems[(EXPORT, f"{YEAR_DIR}/IMG_2.jpg")]
+    assert (problem.kind, problem.taken_at, problem.archive) == ("no_sidecar", None, f"takeout-{EXPORT}-1-001.zip")
+
+
+def test_a_file_with_a_bad_sidecar_is_recorded_as_a_problem():
+    ledger = InMemoryIngestionLedger()
+    archive = _archive(f"takeout-{EXPORT}-1-001.zip", {
+        f"{YEAR_DIR}/IMG_3.jpg": b"jpeg",
+        f"{YEAR_DIR}/IMG_3.jpg.supplemental-metadata.json": b"{not json",
+    })
+
+    _ingest_with_ledger([archive], ledger)
+
+    problem = ledger.problems[(EXPORT, f"{YEAR_DIR}/IMG_3.jpg")]
+    assert problem.kind == "bad_sidecar" and problem.reason
+
+
+def test_a_failed_file_is_recorded_with_its_taken_at():
+    ledger = InMemoryIngestionLedger()
+    archive = _photo_archive(f"takeout-{EXPORT}-1-001.zip", "BAD")
+
+    _ingest_with_ledger([archive], ledger,
+                        lambda entry, metadata: IndexResult(Outcome.FAILED, "OSError: boom"))
+
+    problem = ledger.problems[(EXPORT, f"{YEAR_DIR}/BAD.jpg")]
+    assert (problem.kind, problem.reason) == ("failed", "OSError: boom")
+    assert problem.taken_at == datetime.fromtimestamp(1781282749, tz=timezone.utc)
+
+
+def test_a_problem_is_resolved_when_a_later_run_indexes_the_file():
+    ledger = InMemoryIngestionLedger()
+    name = f"takeout-{EXPORT}-1-001.zip"
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger,
+                        lambda entry, metadata: IndexResult(Outcome.FAILED, "boom"))
+    assert ledger.unresolved() == {(EXPORT, f"{YEAR_DIR}/IMG1.jpg")}
+
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger)
+
+    assert ledger.unresolved() == set()
+
+
+def test_a_problem_is_resolved_when_the_file_turns_out_to_be_already_indexed():
+    ledger = InMemoryIngestionLedger()
+    name = f"takeout-{EXPORT}-1-001.zip"
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger,
+                        lambda entry, metadata: IndexResult(Outcome.FAILED, "boom"))
+
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger,
+                        lambda entry, metadata: IndexResult(Outcome.ALREADY_INDEXED))
+
+    assert ledger.unresolved() == set()
+
+
+def test_a_problem_that_comes_back_is_unresolved_again():
+    ledger = InMemoryIngestionLedger()
+    name = f"takeout-{EXPORT}-1-001.zip"
+    failing = lambda entry, metadata: IndexResult(Outcome.FAILED, "boom")
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger, failing)
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger)
+
+    _ingest_with_ledger([_photo_archive(name, "IMG1")], ledger, failing)
+
+    assert ledger.unresolved() == {(EXPORT, f"{YEAR_DIR}/IMG1.jpg")}
+
+
+def test_an_export_records_its_years_and_export_time():
+    ledger = InMemoryIngestionLedger()
+    archive = _archive(f"takeout-{EXPORT}-1-001.zip", {
+        "Takeout/Google Photos/Photos from 2024/a.jpg": b"x",
+        "Takeout/Google Photos/Photos from 2026/b.jpg": b"x",
+        "Takeout/Google Photos/Trip to Rome/c.jpg": b"x",
+    })
+
+    _ingest_with_ledger([archive], ledger)
+
+    assert ledger.exports[EXPORT] == {
+        "exported_at": datetime(2026, 10, 5, 23, 27, 35, tzinfo=timezone.utc),
+        "archives": {f"takeout-{EXPORT}-1-001.zip"},
+        "years": {2024, 2026},
+    }
+
+
+def test_an_exports_years_are_merged_across_runs_that_saw_different_archives():
+    ledger = InMemoryIngestionLedger()
+    _ingest_with_ledger([_archive(f"takeout-{EXPORT}-1-001.zip", {"Takeout/Google Photos/Photos from 2024/a.jpg": b"x"})], ledger)
+
+    _ingest_with_ledger([_archive(f"takeout-{EXPORT}-1-002.zip", {"Takeout/Google Photos/Photos from 2026/b.jpg": b"x"})], ledger)
+
+    assert ledger.exports[EXPORT]["years"] == {2024, 2026}
+    assert ledger.exports[EXPORT]["archives"] == {f"takeout-{EXPORT}-1-001.zip", f"takeout-{EXPORT}-1-002.zip"}
