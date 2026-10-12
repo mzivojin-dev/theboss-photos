@@ -24,7 +24,7 @@ Google Drive folder
         └── Similar Groups              ──► `grouped_under` / `group_size` in Firestore
 ```
 
-**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline in day sections, with each group of similar photos shown as one cover tile with a "+N" badge; a lightbox with prev/next, a strip of the similar photos behind a cover (arrow up/down steps through it) and "Use as cover"; on-demand original download; ingestion trigger + status polling.
+**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline in day sections, with each group of similar photos shown as one cover tile with a "+N" badge; a lightbox with prev/next, a strip of the similar photos behind a cover (arrow up/down steps through it) and "Use as cover"; on-demand original download; ingestion trigger + status polling; a cleanup page (`/cleanup`) that lists the days you can safely delete from Google Photos.
 
 **Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, and logs whether the ZIP was fully ingested (you then delete it from Drive). Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
 
@@ -155,6 +155,20 @@ Ingestion also keeps an **Ingestion Ledger** in Firestore (`takeout_problems`, `
 
 Ingestion is safe to re-run — already-indexed photos are skipped. Processed ZIPs stay in Drive: the service account can't delete files you own in a My Drive folder, so delete them yourself once the archive summary in the job logs says `fully ingested` (an archive that is `kept` still has files without a Sidecar, usually because another part of the export is missing).
 
+### Cleaning up Google Photos
+
+Google Photos has no delete API, so deleting is manual (see [ADR 0002](docs/adr/0002-google-photos-deletion-is-manual.md)). The app tells you which days are safe, and keeps a record of what you marked deleted.
+
+1. Open **Clean up Google Photos** in the app header (`/cleanup`).
+2. Under **Safe to delete**, pick a range. In photos.google.com, open each day in the range, tick its date header and delete.
+3. Press **Deleted in Google Photos** on that range. The server re-checks that the whole range is still safe (it refuses otherwise), writes an audit entry, and the range drops off the list.
+
+A day is safe when its year is in a Takeout export, it is earlier than that export's date, no unresolved ledger problem has a date within a day of it, and every item on it has its Original in the originals bucket. **Not safe** lists the other days with the reason; **Files to resolve** lists files with no known date (no or bad Sidecar), which can't block a particular day. See *Safe Day* in [CONTEXT.md](CONTEXT.md).
+
+**History** keeps one audit entry per press (`cleanup_log` in Firestore): the range, when you marked it, and every item in it. Open **details** (`/api/cleanup/log/<id>`) for the full list and the evidence it was safe: the covering exports, the number of open problems and the number of objects in the bucket at that moment. The app never edits these entries, but it can't confirm that Google Photos really deleted the items.
+
+Deleted items stay in Google Photos Trash for 60 days; storage is freed only when Trash is emptied (after 60 days, or by hand). One risk the app can't see: a photo taken before the export date but added to Google Photos after it is in no archive, such as a scan or a photo sent to you with an old date. Check a day in Photos before deleting it.
+
 ## Development
 
 ### Run with Docker Compose on Windows
@@ -237,7 +251,7 @@ GCP_REGION=us-central1
 
 ```
 infra/          Terraform — GCS, Firestore, Cloud Run, IAP, IAM
-jobs/ingest/    Python ingestion job + pytest tests
+jobs/ingest/    Python ingestion job (incl. the Ingestion Ledger) + pytest tests
 jobs/compile/   Python Compilation Job and Grouping Job + pytest tests
 app/            Next.js app (API routes + React frontend)
 docs/
