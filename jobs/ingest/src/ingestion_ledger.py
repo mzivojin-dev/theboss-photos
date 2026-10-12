@@ -99,7 +99,12 @@ class FirestoreIngestionLedger:
     def record_export(self, export: str, exported_at: Optional[datetime], archives: Iterable[str],
                       years: Iterable[int]) -> None:
         from google.cloud.firestore import ArrayUnion  # only the Firestore adapter needs the client library
-        data = {"archives": ArrayUnion(sorted(archives)), "years": ArrayUnion(sorted(years))}
+        # ArrayUnion rejects an empty list, and an archive can hold no `Photos from YYYY` folder at all.
+        data: dict = {}
+        if archives := sorted(archives):
+            data["archives"] = ArrayUnion(archives)
+        if years := sorted(years):
+            data["years"] = ArrayUnion(years)
         if exported_at is not None:
             data["exported_at"] = exported_at
         self._db.collection(self.EXPORTS).document(export).set(data, merge=True)
