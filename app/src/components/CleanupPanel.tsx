@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { daysInRange } from "@/lib/safe-days";
+import { bookmarkletUrl, clipboardPayload, PHOTOS_URL } from "@/lib/photos-selector";
 
 interface SafeRange { start: string; end: string; itemCount: number }
 interface UnsafeDay { day: string; itemCount: number; reasons: string[] }
@@ -49,6 +51,19 @@ export default function CleanupPanel() {
 
   useEffect(() => { load(); }, [load]);
 
+  // React refuses `javascript:` hrefs, so the bookmarklet link gets its href by hand.
+  const bookmarkRef = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { bookmarkRef.current?.setAttribute("href", bookmarkletUrl()); });
+
+  const openInPhotos = async (range: SafeRange) => {
+    try {
+      await navigator.clipboard.writeText(clipboardPayload(daysInRange(range.start, range.end), range.itemCount));
+      window.open(PHOTOS_URL, "_blank");
+    } catch {
+      setError("Couldn't copy the dates to the clipboard. Allow clipboard access for this page and try again.");
+    }
+  };
+
   const markDeleted = async (range: SafeRange) => {
     setBusy(range.start);
     try {
@@ -69,9 +84,12 @@ export default function CleanupPanel() {
   return (
     <div style={{ padding: "1rem 1.5rem", maxWidth: 860 }}>
       <p style={muted}>
-        Google Photos has no delete API, so delete these days by hand: open the day in photos.google.com, tick its
-        date header, and delete. Then press the button so the range drops off this list. Deleted items stay in
-        Photos Trash for 60 days; storage is only freed once Trash is emptied (after 60 days, or by hand).
+        Google Photos has no delete API, so you press Delete yourself. Once, drag this link to your bookmarks bar:{" "}
+        <a ref={bookmarkRef} onClick={(e) => e.preventDefault()}>Select cleanup days</a>. Then for a range press
+        “Open in Google Photos” (it copies the dates), click the bookmark on that tab, wait for the summary, check
+        the selection, and press Delete. The script only selects; it never deletes. Then press “Deleted in Google
+        Photos” so the range drops off this list. Deleted items stay in Photos Trash for 60 days; storage is only
+        freed once Trash is emptied.
       </p>
       <p style={muted}>
         Residual risk: a photo taken before the export date but added to Google Photos after it (a scan, or a photo
@@ -92,9 +110,12 @@ export default function CleanupPanel() {
                   {range.start === range.end ? range.start : `${range.start} → ${range.end}`}
                   <span style={muted}> · {range.itemCount} item{range.itemCount === 1 ? "" : "s"}</span>
                 </span>
-                <button onClick={() => markDeleted(range)} disabled={busy !== null}>
-                  {busy === range.start ? "Saving…" : "Deleted in Google Photos"}
-                </button>
+                <span style={{ display: "flex", gap: "0.5rem" }}>
+                  <button onClick={() => openInPhotos(range)}>Open in Google Photos</button>
+                  <button onClick={() => markDeleted(range)} disabled={busy !== null}>
+                    {busy === range.start ? "Saving…" : "Deleted in Google Photos"}
+                  </button>
+                </span>
               </div>
             ))}
           </section>
