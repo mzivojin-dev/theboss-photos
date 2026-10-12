@@ -151,6 +151,8 @@ Each `docker push` prints its digest. Terraform state is in the `photolib-405112
 3. **Open the app** and click **Start Ingestion**. A status badge shows Running → Done / Failed.
 4. **Browse** the timeline. Scroll to load more; photos are grouped by day, and similar photos show as one cover with a "+N" badge. Click a photo for the lightbox; on a cover, pick any of the similar photos in the strip and click **Use as cover** to change which one the timeline shows. Use the download button to retrieve the full-resolution original.
 
+Ingestion also keeps an **Ingestion Ledger** in Firestore (`takeout_problems`, `takeout_exports`): every file it could not index, and which `Photos from YYYY` years each Takeout export contained. Archives ingested before the ledger existed have no entries; re-run ingestion over their ZIPs to fill it in (indexed files are skipped, so it is cheap). See [ADR 0002](docs/adr/0002-google-photos-deletion-is-manual.md).
+
 Ingestion is safe to re-run — already-indexed photos are skipped. Processed ZIPs stay in Drive: the service account can't delete files you own in a My Drive folder, so delete them yourself once the archive summary in the job logs says `fully ingested` (an archive that is `kept` still has files without a Sidecar, usually because another part of the export is missing).
 
 ## Development
@@ -182,6 +184,8 @@ gcloud auth application-default login --impersonate-service-account=theboss-phot
 ```
 
 For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, and the impersonated service account must be able to read the Drive folder and files. Local Compose leaves processed ZIPs in Drive by default, so it does not need delete permission. You can enable deletion by setting `DELETE_PROCESSED_DRIVE_FILES=true` on the `ingest` service in `compose.yaml`; the service account must then have permission to delete the files (Shared Drive files may require the Content manager role).
+
+**Cleanup page with sample data:** `docker compose --profile demo up --build app-demo`, then open http://localhost:3001/cleanup. It uses `CLEANUP_FAKE_DATA=true`: an in-memory store with sample photos, an export, problems and a bucket listing, and needs no Google credentials. Marking a range deleted works (including the audit history) but is forgotten when the container stops.
 
 **Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes grouping fields only; no file is deleted. Leave `GROUP_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 

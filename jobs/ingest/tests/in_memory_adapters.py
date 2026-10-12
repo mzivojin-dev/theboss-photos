@@ -5,6 +5,7 @@ indexed on a thread pool.
 import threading
 from dataclasses import dataclass
 
+from src.ingestion_ledger import Problem
 from src.photo_index_repository import PhotoDoc
 
 
@@ -39,3 +40,29 @@ class InMemoryPhotoIndex:
     def upsert(self, doc: PhotoDoc) -> None:
         with self._lock:
             self.docs[doc.google_photos_id] = doc
+
+
+class InMemoryIngestionLedger:
+    """problems: (export, path) -> Problem; resolved: the keys that have been resolved;
+    exports: export -> {"exported_at", "archives", "years"}."""
+
+    def __init__(self):
+        self.problems: dict[tuple[str, str], Problem] = {}
+        self.resolved: set[tuple[str, str]] = set()
+        self.exports: dict[str, dict] = {}
+
+    def unresolved(self) -> set[tuple[str, str]]:
+        return set(self.problems) - self.resolved
+
+    def record_problem(self, problem: Problem) -> None:
+        key = (problem.export, problem.path)
+        self.problems[key] = problem
+        self.resolved.discard(key)
+
+    def resolve(self, export: str, path: str) -> None:
+        self.resolved.add((export, path))
+
+    def record_export(self, export, exported_at, archives, years) -> None:
+        merged = self.exports.setdefault(export, {"exported_at": exported_at, "archives": set(), "years": set()})
+        merged["archives"] |= set(archives)
+        merged["years"] |= set(years)
