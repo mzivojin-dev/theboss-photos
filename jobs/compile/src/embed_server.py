@@ -1,6 +1,7 @@
 """
 Embeds search text with the same model as the photos, for the app's /api/search. A Cloud Run
-service (theboss-photos-embed) that only the app's service account may call; run it locally with
+service (theboss-photos-embed-text) that only the app's service account may call; run it locally
+with
 
     python -m src.embed_server
 

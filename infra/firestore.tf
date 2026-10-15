@@ -5,13 +5,20 @@ resource "google_firestore_database" "main" {
   type        = "FIRESTORE_NATIVE"
 }
 
-# Nearest-neighbour search over the photos' embeddings (semantic search, /api/search). The dimension
-# matches DIMENSIONS in jobs/compile/src/photo_embeddings.py; a new model with another dimension
-# needs a new index. Flat is the only index type Firestore offers.
+# Nearest-neighbour search over the photos' embeddings (semantic search, /api/search), among the
+# photos embedded with the query's model (`embedding_model ==`, so old and new vectors are never
+# compared during a model change). The dimension matches DIMENSIONS in
+# jobs/compile/src/photo_embeddings.py; a model with another dimension needs a new index. Flat is
+# the only index type Firestore offers.
 resource "google_firestore_index" "photos_embedding" {
   project    = var.project_id
   database   = google_firestore_database.main.name
   collection = "photos"
+
+  fields {
+    field_path = "embedding_model"
+    order      = "ASCENDING"
+  }
 
   fields {
     field_path = "__name__"

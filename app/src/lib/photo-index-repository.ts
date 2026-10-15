@@ -88,7 +88,7 @@ export class PhotoIndexRepository {
   /** The photos a cover stands for, the cover first, then the rest in the order they were taken. */
   async group(coverId: string): Promise<PhotoResult[]> {
     const [cover, members] = await Promise.all([
-      this.db.collection("photos").doc(coverId).get(),
+      getPhoto(this.db, coverId),
       this.db.collection("photos").select(...PHOTO_RESULT_FIELDS).where("grouped_under", "==", coverId).get(),
     ]);
     const rest = members.docs
@@ -104,7 +104,7 @@ export class PhotoIndexRepository {
  */
 export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string): Promise<PhotoResult | null> {
   const photos = db.collection("photos");
-  const chosen = await photos.doc(photoId).get();
+  const chosen = await getPhoto(db, photoId);
   if (!chosen.exists) return null;
 
   const oldCoverId: string | undefined = chosen.data()!.grouped_under;
@@ -115,7 +115,7 @@ export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string)
     return toResult(chosen);
   }
 
-  const behind = await photos.where("grouped_under", "==", oldCoverId).get();
+  const behind = await photos.where("grouped_under", "==", oldCoverId).select().get(); // references only
   const size = behind.docs.length + 1; // the photos behind the old cover, and the old cover itself
   batch.update(chosen.ref, {
     grouped_under: FieldValue.delete(),
@@ -132,6 +132,12 @@ export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string)
   }
   await batch.commit();
   return { ...toResult(chosen), groupSize: size };
+}
+
+/** One photo's document, read with only PHOTO_RESULT_FIELDS. */
+async function getPhoto(db: FirebaseFirestore.Firestore, id: string): Promise<FirebaseFirestore.DocumentSnapshot> {
+  const [snapshot] = await db.getAll(db.collection("photos").doc(id), { fieldMask: PHOTO_RESULT_FIELDS });
+  return snapshot;
 }
 
 export function toResult(doc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot): PhotoResult {

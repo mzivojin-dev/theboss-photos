@@ -254,7 +254,7 @@ resource "google_cloud_run_v2_job" "embed" {
 
 # Embeds search text with the same model, for the app's /api/search. Private: only the app's
 # service account may invoke it (iam.tf). Scales to zero, so the first search after a quiet spell
-# waits for the model to load (~15s).
+# waits for the model to load (~20s).
 resource "google_cloud_run_v2_service" "embed_text" {
   name     = "theboss-photos-embed-text"
   location = var.region

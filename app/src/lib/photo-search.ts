@@ -1,3 +1,4 @@
+import type { TextEmbedding } from "./embed-client";
 import { PHOTO_RESULT_FIELDS, toResult, type PhotoResult } from "./photo-index-repository";
 
 /** Firestore returns at most this many neighbours from one vector query. */
@@ -12,7 +13,10 @@ export interface SearchOptions {
 }
 
 /**
- * The photos whose embeddings are nearest the query's, best match first. A photo hidden behind a
+ * The photos whose embeddings are nearest the query's, best match first. Only photos embedded with
+ * the query's model are compared: while a new model is being rolled out, photos not yet re-embedded
+ * are left out rather than matched against a vector from another space.
+ * A photo hidden behind a
  * Similar Group's cover is shown as that cover, so a group appears once, as on the Timeline.
  *
  * The date range is applied to the nearest neighbours rather than inside the vector query, so with
@@ -21,16 +25,17 @@ export interface SearchOptions {
  */
 export async function searchPhotos(
   db: FirebaseFirestore.Firestore,
-  queryVector: number[],
+  query: TextEmbedding,
   { limit, from, to }: SearchOptions,
 ): Promise<PhotoResult[]> {
   const dated = Boolean(from || to);
   const snapshot = await db
     .collection("photos")
+    .where("embedding_model", "==", query.model)
     .select(...PHOTO_RESULT_FIELDS)
     .findNearest({
       vectorField: "embedding",
-      queryVector,
+      queryVector: query.embedding,
       // Extra neighbours make up for those that collapse into a cover already in the results.
       limit: dated ? MAX_NEIGHBOURS : Math.min(limit * 3, MAX_NEIGHBOURS),
       distanceMeasure: "COSINE",

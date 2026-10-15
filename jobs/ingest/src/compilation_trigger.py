@@ -6,13 +6,17 @@ indexed.
 """
 import logging
 import threading
-from typing import Callable, Optional, TypeVar
+from typing import Callable, Mapping, Optional, TypeVar
 
 from .index_outcome import IndexResult, Outcome
 
 log = logging.getLogger(__name__)
 
 RUN_JOB_URL = "https://run.googleapis.com/v2/projects/{project}/locations/{region}/jobs/{job}:run"
+
+# The settings naming the jobs to start after a run, in the order they are started: the Grouping
+# Job, the Embedding Job (semantic search), then the Compilation Job. Each is optional.
+JOB_NAME_SETTINGS = ("GROUP_JOB_NAME", "EMBED_JOB_NAME", "COMPILE_JOB_NAME")
 
 M = TypeVar("M")
 D = TypeVar("D")
@@ -29,6 +33,11 @@ class CloudRunJob:
     def start(self) -> None:
         response = self._session.post(self._url, json={}, timeout=60)
         response.raise_for_status()
+
+
+def configured_jobs(environ: Mapping[str, str]) -> list[str]:
+    """The names of the jobs to start after a run, from the settings that are set and not empty."""
+    return [environ[setting] for setting in JOB_NAME_SETTINGS if environ.get(setting)]
 
 
 def start_all(starts: list[Callable[[], None]]) -> Callable[[], None]:

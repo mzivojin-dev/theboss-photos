@@ -122,11 +122,13 @@ describe("PhotoIndexRepository", () => {
         exists: true,
         data: () => ({ ...makeDoc(), taken_at: { toDate: () => new Date(2021, 0, day) } }),
       });
-      mockDb.doc.mockReturnValue({ get: jest.fn().mockResolvedValue(doc("COVER", 5)) });
+      mockDb.doc.mockImplementation((id: string) => ({ id }));
+      mockDb.getAll = jest.fn().mockResolvedValue([doc("COVER", 5)]);
       mockDb.get.mockResolvedValue({ docs: [doc("LATE", 7), doc("EARLY", 4)] });
 
       const photos = await repo.group("COVER");
       expect(photos.map((p) => p.id)).toEqual(["COVER", "EARLY", "LATE"]);
+      expect(mockDb.getAll).toHaveBeenCalledWith({ id: "COVER" }, { fieldMask: PHOTO_RESULT_FIELDS });
     });
   });
 });
@@ -148,9 +150,13 @@ describe("pinCover", () => {
     const db: any = {
       batch: () => batch,
       collection: () => ({
-        doc: (id: string) => ({ id, get: () => Promise.resolve(docs[id] ?? { exists: false }) }),
-        where: () => ({ get: () => Promise.resolve({ docs: behindOldCover }) }),
+        doc: (id: string) => ({ id }),
+        where: () => ({ select: () => ({ get: () => Promise.resolve({ docs: behindOldCover }) }) }),
       }),
+      getAll: (ref: { id: string }, options: object) => {
+        expect(options).toEqual({ fieldMask: PHOTO_RESULT_FIELDS });
+        return Promise.resolve([docs[ref.id] ?? { exists: false }]);
+      },
     };
     return { db, updates, batch };
   }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Timeline, { Tile } from "./Timeline";
 import Lightbox from "./Lightbox";
 import type { Photo } from "@/lib/photo";
+import { localDayRange } from "@/lib/search-params";
 
 type Results =
   | { state: "idle" }
@@ -28,8 +29,9 @@ export default function PhotoBrowser() {
     if (!q) return clear();
     setResults({ state: "searching", query: q });
     const params = new URLSearchParams({ q });
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
+    const range = localDayRange(from, to);
+    if (range.from) params.set("from", range.from);
+    if (range.to) params.set("to", range.to);
     try {
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
