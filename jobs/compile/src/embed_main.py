@@ -13,8 +13,7 @@ from google.cloud import firestore, storage
 from google.cloud.exceptions import NotFound
 from google.cloud.firestore_v1.vector import Vector
 
-from .gcp import PHOTO_INDEX
-from .group_main import GcsPreviews
+from .gcp import PHOTO_INDEX, GcsPreviews
 from .photo_embeddings import MODEL_ID, IndexedPhoto, run
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
