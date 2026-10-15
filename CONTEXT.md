@@ -15,7 +15,7 @@ A resized, lower-quality version of a photo (~200KB), generated at ingestion tim
 The full-resolution photo or video extracted from a Takeout Archive. Stored in GCS Archive tier as an individual object. Retrieved only when the user explicitly requests a download.
 
 **Ingestion Job**
-A Cloud Run Job that reads Takeout Archives from Google Drive via byte-range requests (no full ZIP download), extracts files in memory, generates Previews, and writes Previews and Originals to their respective GCS buckets. It also writes new media to Staging, and starts the Compilation Job after a run that indexed anything.
+A Cloud Run Job that reads Takeout Archives from Google Drive via byte-range requests (no full ZIP download), extracts files in memory, generates Previews, and writes Previews and Originals to their respective GCS buckets. It also writes new media to Staging, and starts the Compilation, Grouping and Embedding Jobs after a run that indexed anything.
 
 **Media Indexer**
 The part of the Ingestion Job that indexes one media file (photo or video) from a Takeout Archive, given its Sidecar metadata: it skips files already in the Photo Index, writes the Original and (for photos) the Preview Image, then writes the Photo Index document last, so a document's presence means the file is fully indexed.
@@ -44,6 +44,15 @@ Photos that are all alike (every pair has perceptual hashes within 10 of 64 bits
 **Grouping Job**
 Measures photos not measured yet, then regroups all of them into Similar Groups (`python -m src.group_main` in `jobs/compile`; Cloud Run job `theboss-photos-group`, from the compile image). Started by the Ingestion Job after a run that indexed anything. Safe to repeat and to overlap (it recomputes from the stored measurements). A photo it can't measure is shown on its own. Photos are un-hidden before others are hidden, so an interrupted run never leaves a photo hidden behind a missing cover.
 
+**Embedding**
+A 768-number vector for a photo, made from its Preview by the model named in `embedding_model` (now `open_clip/ViT-B-16-SigLIP2/webli`). Text is embedded by the same model into the same space, so a query's vector can be compared directly with the photos' vectors. Stored in the Photo Index as `embedding`, `embedding_model` and `embedded_at`. Videos have none.
+
+**Embedding Job**
+Embeds every photo without an Embedding from the current model (`python -m src.embed_main` in `jobs/compile`; Cloud Run job `theboss-photos-embed`, from the compile image). Started by the Ingestion Job after a run that indexed anything. Safe to repeat and to overlap. A photo it can't embed is skipped and tried again next run. Changing the model re-embeds the whole library.
+
+**Semantic Search**
+Finding photos by what they show ("kids on a beach at sunset"), not by date. `GET /api/search?q=...&from=&to=` sends the text to the embed-text service (Cloud Run service `theboss-photos-embed-text`), then runs Firestore's nearest-neighbour search over the Embeddings. Results come best match first, up to 60, optionally within a date range. A photo behind a Similar Group's cover shows as the cover. Search always returns its closest photos, even when nothing really matches. Read-only: nothing is hidden or deleted. See ADR 0003.
+
 **Drive Folder**
 A designated Google Drive folder owned by a single Google account (personal use). All Takeout Archives are placed here manually by the user before triggering an Ingestion Job, and removed by the user once fully ingested: the service account can't delete files the user owns.
 
@@ -69,9 +78,11 @@ Infinite scroll, sectioned by local day — loads up to 50 Timeline tiles per ba
 
 Out of scope for MVP: albums, map view, search, face/object tagging, video playback, shared access.
 
+Added after the MVP: Semantic Search (search box above the Timeline).
+
 ## Data Store
 
-**Photo Index** — Cloud Firestore collection storing one document per photo or video, with `media_type` (`photo` | `video`), `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field). Queried for the timeline ordered by `taken_at`.
+**Photo Index** — Cloud Firestore collection storing one document per photo or video, with `media_type` (`photo` | `video`), `taken_at` (timestamp), `preview_gcs_path`, `original_gcs_path`, `filename`, `width`, `height`, `google_photos_id` (from sidecar URL field), and an Embedding once the Embedding Job has run. Queried for the timeline ordered by `taken_at`, and by nearest Embedding for Semantic Search.
 
 **cleanup_days** — One document per day (id `YYYY-MM-DD`) the user has marked deleted in Google Photos; such days drop off the Safe Day list.
 

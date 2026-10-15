@@ -22,15 +22,21 @@ Google Drive folder
         └── Compilation (trip video)    ──► GCS Standard  + `compilations` in Firestore
    Grouping Job (Cloud Run Job, Python + OpenCV)     ── reads Previews, the Photo Index
         └── Similar Groups              ──► `grouped_under` / `group_size` in Firestore
+   Embedding Job (Cloud Run Job, Python + SigLIP2)   ── reads Previews, the Photo Index
+        └── Embeddings                  ──► `embedding` (Firestore vector) ◄── /api/search
+                                                         ▲ query text embedded by the
+                                                           embed-text Cloud Run service
 ```
 
-**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline in day sections, with each group of similar photos shown as one cover tile with a "+N" badge; a lightbox with prev/next, a strip of the similar photos behind a cover (arrow up/down steps through it) and "Use as cover"; on-demand original download; ingestion trigger + status polling; a cleanup page (`/cleanup`) that lists the days you can safely delete from Google Photos.
+**App** — Next.js on Cloud Run, behind Cloud IAP (single Google account only). Infinite-scroll timeline in day sections, with each group of similar photos shown as one cover tile with a "+N" badge; a lightbox with prev/next, a strip of the similar photos behind a cover (arrow up/down steps through it) and "Use as cover"; a search box that finds photos by what they show ("kids on a beach at sunset"), optionally within dates; on-demand original download; ingestion trigger + status polling; a cleanup page (`/cleanup`) that lists the days you can safely delete from Google Photos.
 
 **Ingestion Job** — Cloud Run Job. For each ZIP in the Drive folder: streams the ZIP central directory via Range requests, extracts each photo/video in-memory, generates a 1280px WebP preview, writes to GCS, indexes metadata to Firestore, and logs whether the ZIP was fully ingested (you then delete it from Drive). Deduplicates by `google_photos_id` so re-ingesting overlapping archives is safe.
 
 **Compilation Job** — Cloud Run Job, started by the Ingestion Job after a run that indexed new media. Finds Trips (runs of days more than 50 km from home, with video) and makes a Compilation for each Trip whose media changed: the best stretch of each clip, photos preferring clear faces, a chapter per day, captions, and public-domain music. Output keeps the footage's orientation and HDR. See [ADR 0001](docs/adr/0001-compilations-via-staging-and-a-job-started-by-ingestion.md).
 
 **Grouping Job** — Cloud Run Job (`theboss-photos-group`, run from the compile image), started by the Ingestion Job alongside the Compilation Job. Groups similar photos (bursts, retakes) behind a cover: every pair has perceptual hashes within 10 of 64 bits and the same number of clear faces, and the group spans at most 2 minutes. It measures only photos it hasn't yet, regroups all of them, and writes `grouped_under` (on the photos behind a cover), `group_size` (on the cover) and `cover_pinned` (a cover you chose) to the Photo Index. **Every file is kept; nothing is deleted.** Safe to repeat. See *Similar Group* in [CONTEXT.md](CONTEXT.md).
+
+**Embedding Job** — Cloud Run Job (`theboss-photos-embed`, run from the compile image), started by the Ingestion Job alongside the others. Embeds each photo's Preview with `ViT-B-16-SigLIP2` (open_clip, CPU) and stores the vector in the Photo Index for Semantic Search. Embeds only photos without a vector from the current model; safe to repeat. Search text is embedded by the same model in a private Cloud Run service (`theboss-photos-embed-text`) that scales to zero, so the first search after a quiet spell takes ~20 s. See *Semantic Search* in [CONTEXT.md](CONTEXT.md) and [ADR 0003](docs/adr/0003-semantic-search-with-local-siglip2-and-firestore-vectors.md).
 
 ## Prerequisites
 
@@ -52,7 +58,7 @@ terraform apply \
   -var="drive_folder_id=<your-drive-folder-id>"
 ```
 
-This provisions: four GCS buckets (Standard for previews, staging and compilations; Archive for originals), Firestore database `photo-lib`, the Cloud Run service, the ingestion, compilation and grouping jobs, the service account, and IAP.
+This provisions: four GCS buckets (Standard for previews, staging and compilations; Archive for originals), Firestore database `photo-lib`, the Cloud Run service, the ingestion, compilation, grouping and embedding jobs, the embed-text service, the photos' vector index, the service account, and IAP.
 
 ### Cost attribution and analysis
 
@@ -122,7 +128,7 @@ docker build -t gcr.io/photolib-405112/theboss-photos-compile:latest .
 docker push gcr.io/photolib-405112/theboss-photos-compile:latest
 ```
 
-The compilation image must be pushed before the first `terraform apply` that creates the jobs, or Cloud Run rejects them. The photo grouping job (`theboss-photos-group`) runs from this same image.
+The compilation image must be pushed before the first `terraform apply` that creates the jobs, or Cloud Run rejects them. The photo grouping job (`theboss-photos-group`), the Embedding Job (`theboss-photos-embed`) and the embed-text service (`theboss-photos-embed-text`) run from this same image.
 
 ### 3. Deploy
 
@@ -140,9 +146,19 @@ gcloud run services update theboss-photos $R --image gcr.io/photolib-405112/theb
 gcloud run jobs update theboss-photos-ingest $R --image gcr.io/photolib-405112/theboss-photos-ingest@sha256:<digest>
 gcloud run jobs update theboss-photos-compile $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
 gcloud run jobs update theboss-photos-group $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
+gcloud run jobs update theboss-photos-embed $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
+gcloud run services update theboss-photos-embed-text $R --image gcr.io/photolib-405112/theboss-photos-compile@sha256:<digest>
 ```
 
-Each `docker push` prints its digest. Terraform state is in the `photolib-405112-tfstate` bucket; run Terraform as your own Google account, since the app service account can't read it. To group an existing library the first time (or after changing the grouping rules), run `gcloud run jobs execute theboss-photos-group --region us-central1`.
+**Registry cleanup.** Every push keeps the old image, and the compile image carries ~1.7 GB of model weights and torch, so the `gcr.io` repository has a cleanup policy (`infra/registry-cleanup-policy.json`). It keeps the 10 most recent versions of each image (a push makes several: the index, the image and its attestation) and deletes untagged versions older than 30 days. Tagged images (`:latest`) are never deleted. Terraform doesn't manage the `gcr.io` repository, so the policy is applied with gcloud; Artifact Registry runs it about once a day:
+
+```bash
+gcloud artifacts repositories set-cleanup-policies gcr.io --location=us --project=photolib-405112 --policy=infra/registry-cleanup-policy.json --no-dry-run
+```
+
+Before applying it, check that no Cloud Run service or job runs an image older than the 10 most recent versions of its package. Deleting such an image stops that revision from starting new instances.
+
+Each `docker push` prints its digest. Terraform state is in the `photolib-405112-tfstate` bucket; run Terraform as your own Google account, since the app service account can't read it. To group an existing library the first time (or after changing the grouping rules), run `gcloud run jobs execute theboss-photos-group --region us-central1`. Likewise, to embed an existing library for search the first time (or after changing the model), run `gcloud run jobs execute theboss-photos-embed --region us-central1`.
 
 ## Usage
 
@@ -203,6 +219,8 @@ For local Docker ingestion, ADC needs both the Cloud Platform and Drive scopes, 
 
 **Similar photos locally:** `docker compose run --rm group` groups similar photos in the real Photo Index (needs `GCP_PROJECT_ID` and `PREVIEWS_BUCKET`). It writes grouping fields only; no file is deleted. Leave `GROUP_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 
+**Search locally:** `docker compose run --rm embed` embeds the real Photo Index's photos (writes `embedding` fields only). `docker compose --profile search up` also starts the embed-text service the app's search box calls.
+
 **Compilations locally:** set `STAGING_BUCKET` in `.env` to stage new media during local ingestion, and `COMPILATIONS_BUCKET` to run the Compilation Job with `docker compose run --rm compile`. It reads the real Photo Index and buckets, and writes real Compilations. Leave `COMPILE_JOB_NAME` empty locally unless local ingestion should start the job in Cloud Run.
 
 **Run Python tests:**
@@ -252,7 +270,7 @@ GCP_REGION=us-central1
 ```
 infra/          Terraform — GCS, Firestore, Cloud Run, IAP, IAM
 jobs/ingest/    Python ingestion job (incl. the Ingestion Ledger) + pytest tests
-jobs/compile/   Python Compilation Job and Grouping Job + pytest tests
+jobs/compile/   Python Compilation, Grouping and Embedding Jobs, embed-text service + pytest tests
 app/            Next.js app (API routes + React frontend)
 docs/
   prd-001-google-photos-viewer.md   Full product spec

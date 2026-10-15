@@ -35,6 +35,16 @@ export interface ListResult {
   nextCursor: string | null;
 }
 
+/**
+ * The fields a PhotoResult is made from, and `grouped_under` to tell covers from the photos behind
+ * them. Queries select only these: a photo's document also holds its 768-number search embedding,
+ * which the browser never needs.
+ */
+export const PHOTO_RESULT_FIELDS = [
+  "taken_at", "preview_gcs_path", "original_gcs_path", "youtube_video_id", "width", "height",
+  "group_size", "grouped_under",
+];
+
 export class PhotoIndexRepository {
   constructor(private db: FirebaseFirestore.Firestore) {}
 
@@ -51,6 +61,7 @@ export class PhotoIndexRepository {
     while (photos.length < limit) {
       let query = this.db
         .collection("photos")
+        .select(...PHOTO_RESULT_FIELDS)
         .orderBy("taken_at", "desc")
         .limit(limit);
 
@@ -78,7 +89,7 @@ export class PhotoIndexRepository {
   async group(coverId: string): Promise<PhotoResult[]> {
     const [cover, members] = await Promise.all([
       this.db.collection("photos").doc(coverId).get(),
-      this.db.collection("photos").where("grouped_under", "==", coverId).get(),
+      this.db.collection("photos").select(...PHOTO_RESULT_FIELDS).where("grouped_under", "==", coverId).get(),
     ]);
     const rest = members.docs
       .map(toResult)
@@ -123,7 +134,7 @@ export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string)
   return { ...toResult(chosen), groupSize: size };
 }
 
-function toResult(doc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot): PhotoResult {
+export function toResult(doc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot): PhotoResult {
   const data = doc.data()!;
   return {
     id: doc.id,

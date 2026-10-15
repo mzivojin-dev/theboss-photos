@@ -1,7 +1,8 @@
 """
-Starts the Compilation Job, and the job that groups similar photos, once an ingestion run has indexed
-new media, so trips get their Compilations and the timeline its Similar Groups without anyone pressing
-a button. One start per run, however much was indexed.
+Starts the Compilation Job, and the jobs that group similar photos and embed photos for search, once
+an ingestion run has indexed new media, so trips get their Compilations, the timeline its Similar
+Groups and search its vectors without anyone pressing a button. One start per run, however much was
+indexed.
 """
 import logging
 import threading

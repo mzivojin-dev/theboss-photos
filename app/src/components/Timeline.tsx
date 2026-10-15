@@ -143,7 +143,7 @@ export default function Timeline() {
 }
 
 /** A photo sized to its shape, so each row fills the width without cropping. */
-function Tile({ photo, onOpen }: { photo: Photo; onOpen: () => void }) {
+export function Tile({ photo, onOpen }: { photo: Photo; onOpen: () => void }) {
   const [loaded, setLoaded] = useState(false);
   const ratio = photo.width && photo.height ? photo.width / photo.height : 4 / 3;
   const stacked = (photo.groupSize ?? 0) > 1;

@@ -52,3 +52,11 @@ resource "google_service_account_iam_member" "app_token_creator" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.app.email}"
 }
+
+# Cloud Run: the app may call the private service that embeds search text
+resource "google_cloud_run_v2_service_iam_member" "app_invokes_embed_text" {
+  name     = google_cloud_run_v2_service.embed_text.name
+  location = google_cloud_run_v2_service.embed_text.location
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.app.email}"
+}

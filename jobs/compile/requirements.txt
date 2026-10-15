@@ -7,3 +7,9 @@ opencv-python-headless==5.0.0.93
 reverse_geocoder==1.5.1
 timezonefinder==9.0.0
 tzdata
+# Semantic search embeddings (photo_embeddings.py, siglip.py): CPU-only torch, ~1 GB smaller than CUDA.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+open_clip_torch==3.3.0
+transformers==5.20.0

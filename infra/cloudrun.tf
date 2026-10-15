@@ -38,6 +38,10 @@ resource "google_cloud_run_v2_service" "app" {
         name  = "INGEST_TRIGGER_MODE"
         value = "cloud"
       }
+      env {
+        name  = "EMBED_SERVICE_URL"
+        value = google_cloud_run_v2_service.embed_text.uri
+      }
 
       resources {
         limits = {
@@ -96,6 +100,10 @@ resource "google_cloud_run_v2_job" "ingest" {
         env {
           name  = "GROUP_JOB_NAME"
           value = google_cloud_run_v2_job.group.name
+        }
+        env {
+          name  = "EMBED_JOB_NAME"
+          value = google_cloud_run_v2_job.embed.name
         }
         env {
           name  = "GCP_REGION"
@@ -199,6 +207,91 @@ resource "google_cloud_run_v2_job" "group" {
             memory = "2Gi"
           }
         }
+      }
+    }
+  }
+}
+
+# Embeds photos for semantic search (see "Embedding Job" in CONTEXT.md). Runs from the compile image,
+# which has the model weights baked in. Started by the ingestion job after a run that indexed new
+# media; embeds only photos without a vector from the current model, so reruns are cheap.
+resource "google_cloud_run_v2_job" "embed" {
+  name     = "theboss-photos-embed"
+  location = var.region
+  labels   = local.cost_labels
+
+  template {
+    labels = local.cost_labels
+
+    template {
+      service_account = google_service_account.app.email
+      timeout         = "21600s" # 6 hours: a first run embeds the whole library at ~0.2s a photo
+      max_retries     = 1
+
+      containers {
+        image   = "gcr.io/${var.project_id}/theboss-photos-compile:latest"
+        command = ["python", "-m", "src.embed_main"]
+
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.project_id
+        }
+        env {
+          name  = "PREVIEWS_BUCKET"
+          value = google_storage_bucket.previews.name
+        }
+
+        resources {
+          limits = {
+            cpu    = "4"
+            memory = "4Gi"
+          }
+        }
+      }
+    }
+  }
+}
+
+# Embeds search text with the same model, for the app's /api/search. Private: only the app's
+# service account may invoke it (iam.tf). Scales to zero, so the first search after a quiet spell
+# waits for the model to load (~15s).
+resource "google_cloud_run_v2_service" "embed_text" {
+  name     = "theboss-photos-embed-text"
+  location = var.region
+  labels   = local.cost_labels
+
+  template {
+    labels          = local.cost_labels
+    service_account = google_service_account.app.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image   = "gcr.io/${var.project_id}/theboss-photos-compile:latest"
+      command = ["python", "-m", "src.embed_server"]
+
+      ports {
+        container_port = 8080
+      }
+
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "4Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      startup_probe {
+        tcp_socket {
+          port = 8080
+        }
+        period_seconds    = 5
+        failure_threshold = 24 # two minutes for the model to load
       }
     }
   }

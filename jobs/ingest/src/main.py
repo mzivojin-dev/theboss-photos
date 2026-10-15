@@ -55,6 +55,8 @@ STAGING_BUCKET = os.environ.get("STAGING_BUCKET")
 COMPILE_JOB_NAME = os.environ.get("COMPILE_JOB_NAME")
 # Optional: the job that groups similar photos behind a cover; started alongside the Compilation Job.
 GROUP_JOB_NAME = os.environ.get("GROUP_JOB_NAME")
+# Optional: the job that embeds photos for semantic search; started alongside the Compilation Job.
+EMBED_JOB_NAME = os.environ.get("EMBED_JOB_NAME")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 
 
@@ -187,7 +189,7 @@ def run() -> None:
         )
         for zip_file in zip_files
     ]
-    job_names = [name for name in (GROUP_JOB_NAME, COMPILE_JOB_NAME) if name]
+    job_names = [name for name in (GROUP_JOB_NAME, EMBED_JOB_NAME, COMPILE_JOB_NAME) if name]
     compilation = CompilationTrigger(
         start_all([CloudRunJob(auth_session, PROJECT_ID, GCP_REGION, name).start for name in job_names])
         if job_names else None

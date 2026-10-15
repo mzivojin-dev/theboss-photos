@@ -2,7 +2,7 @@
  * RED: tests for PhotoIndexRepository
  * Fail until src/lib/photo-index-repository.ts is implemented.
  */
-import { PhotoIndexRepository, PhotoDoc, pinCover } from "@/lib/photo-index-repository";
+import { PhotoIndexRepository, PhotoDoc, PHOTO_RESULT_FIELDS, pinCover } from "@/lib/photo-index-repository";
 
 jest.mock("@google-cloud/firestore", () => ({ FieldValue: { delete: () => "DELETE" } }));
 
@@ -26,6 +26,7 @@ describe("PhotoIndexRepository", () => {
   beforeEach(() => {
     mockDb = {
       collection: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
@@ -35,6 +36,7 @@ describe("PhotoIndexRepository", () => {
       set: jest.fn(),
     };
     mockDb.collection.mockReturnValue(mockDb);
+    mockDb.select.mockReturnValue(mockDb);
     mockDb.where.mockReturnValue(mockDb);
     mockDb.orderBy.mockReturnValue(mockDb);
     mockDb.limit.mockReturnValue(mockDb);
@@ -44,6 +46,13 @@ describe("PhotoIndexRepository", () => {
   });
 
   describe("list", () => {
+    it("reads only the fields a photo tile needs, not the search embedding", async () => {
+      mockDb.get.mockResolvedValue({ docs: [] });
+      await repo.list({ limit: 50 });
+      expect(mockDb.select).toHaveBeenCalledWith(...PHOTO_RESULT_FIELDS);
+      expect(PHOTO_RESULT_FIELDS).not.toContain("embedding");
+    });
+
     it("returns photos in order from Firestore", async () => {
       const fakeDocs = [
         { id: "AAA", data: () => ({ ...makeDoc(), taken_at: { toDate: () => new Date("2021-06-01") } }) },
