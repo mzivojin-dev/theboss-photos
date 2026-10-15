@@ -1,5 +1,5 @@
 import Link from "next/link";
-import Timeline from "@/components/Timeline";
+import PhotoBrowser from "@/components/PhotoBrowser";
 import IngestionPanel from "@/components/IngestionPanel";
 
 export default function Home() {
@@ -12,7 +12,7 @@ export default function Home() {
           <IngestionPanel />
         </div>
       </header>
-      <Timeline />
+      <PhotoBrowser />
     </main>
   );
 }

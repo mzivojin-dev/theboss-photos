@@ -21,7 +21,7 @@ from google.cloud import storage, firestore
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .compilation_trigger import CloudRunJob, CompilationTrigger, start_all
+from .compilation_trigger import CloudRunJob, CompilationTrigger, configured_jobs, start_all
 from .drive_zip_streamer import DriveZipStreamer
 from .gcs_blob_store import GcsBlobStore
 from .ingestion_ledger import FirestoreIngestionLedger
@@ -50,11 +50,10 @@ PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 PREVIEWS_BUCKET = os.environ["PREVIEWS_BUCKET"]
 ORIGINALS_BUCKET = os.environ["ORIGINALS_BUCKET"]
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
-# Optional: stage new media for the Compilation Job, and start that job after a run.
+# Optional: stage new media for the Compilation Job.
 STAGING_BUCKET = os.environ.get("STAGING_BUCKET")
-COMPILE_JOB_NAME = os.environ.get("COMPILE_JOB_NAME")
-# Optional: the job that groups similar photos behind a cover; started alongside the Compilation Job.
-GROUP_JOB_NAME = os.environ.get("GROUP_JOB_NAME")
+# The jobs started after a run that indexed media (GROUP_JOB_NAME, EMBED_JOB_NAME, COMPILE_JOB_NAME)
+# are read in run(); see JOB_NAME_SETTINGS in compilation_trigger.py.
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 
 
@@ -187,7 +186,7 @@ def run() -> None:
         )
         for zip_file in zip_files
     ]
-    job_names = [name for name in (GROUP_JOB_NAME, COMPILE_JOB_NAME) if name]
+    job_names = configured_jobs(os.environ)
     compilation = CompilationTrigger(
         start_all([CloudRunJob(auth_session, PROJECT_ID, GCP_REGION, name).start for name in job_names])
         if job_names else None

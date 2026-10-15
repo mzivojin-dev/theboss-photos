@@ -35,6 +35,16 @@ export interface ListResult {
   nextCursor: string | null;
 }
 
+/**
+ * The fields a PhotoResult is made from, and `grouped_under` to tell covers from the photos behind
+ * them. Queries select only these: a photo's document also holds its 768-number search embedding,
+ * which the browser never needs.
+ */
+export const PHOTO_RESULT_FIELDS = [
+  "taken_at", "preview_gcs_path", "original_gcs_path", "youtube_video_id", "width", "height",
+  "group_size", "grouped_under",
+];
+
 export class PhotoIndexRepository {
   constructor(private db: FirebaseFirestore.Firestore) {}
 
@@ -51,6 +61,7 @@ export class PhotoIndexRepository {
     while (photos.length < limit) {
       let query = this.db
         .collection("photos")
+        .select(...PHOTO_RESULT_FIELDS)
         .orderBy("taken_at", "desc")
         .limit(limit);
 
@@ -77,8 +88,8 @@ export class PhotoIndexRepository {
   /** The photos a cover stands for, the cover first, then the rest in the order they were taken. */
   async group(coverId: string): Promise<PhotoResult[]> {
     const [cover, members] = await Promise.all([
-      this.db.collection("photos").doc(coverId).get(),
-      this.db.collection("photos").where("grouped_under", "==", coverId).get(),
+      getPhoto(this.db, coverId),
+      this.db.collection("photos").select(...PHOTO_RESULT_FIELDS).where("grouped_under", "==", coverId).get(),
     ]);
     const rest = members.docs
       .map(toResult)
@@ -93,7 +104,7 @@ export class PhotoIndexRepository {
  */
 export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string): Promise<PhotoResult | null> {
   const photos = db.collection("photos");
-  const chosen = await photos.doc(photoId).get();
+  const chosen = await getPhoto(db, photoId);
   if (!chosen.exists) return null;
 
   const oldCoverId: string | undefined = chosen.data()!.grouped_under;
@@ -104,7 +115,7 @@ export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string)
     return toResult(chosen);
   }
 
-  const behind = await photos.where("grouped_under", "==", oldCoverId).get();
+  const behind = await photos.where("grouped_under", "==", oldCoverId).select().get(); // references only
   const size = behind.docs.length + 1; // the photos behind the old cover, and the old cover itself
   batch.update(chosen.ref, {
     grouped_under: FieldValue.delete(),
@@ -123,7 +134,13 @@ export async function pinCover(db: FirebaseFirestore.Firestore, photoId: string)
   return { ...toResult(chosen), groupSize: size };
 }
 
-function toResult(doc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot): PhotoResult {
+/** One photo's document, read with only PHOTO_RESULT_FIELDS. */
+async function getPhoto(db: FirebaseFirestore.Firestore, id: string): Promise<FirebaseFirestore.DocumentSnapshot> {
+  const [snapshot] = await db.getAll(db.collection("photos").doc(id), { fieldMask: PHOTO_RESULT_FIELDS });
+  return snapshot;
+}
+
+export function toResult(doc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot): PhotoResult {
   const data = doc.data()!;
   return {
     id: doc.id,

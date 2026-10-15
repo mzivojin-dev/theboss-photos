@@ -10,6 +10,12 @@ ENV OPENCV_LOG_LEVEL=ERROR
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Semantic search model weights, baked in so jobs and the embed service never download at run time.
+# Keep in step with MODEL_NAME / PRETRAINED in src/photo_embeddings.py.
+ENV HF_HOME=/app/hf
+RUN python -c "import open_clip; open_clip.create_model_and_transforms('ViT-B-16-SigLIP2', pretrained='webli'); open_clip.get_tokenizer('ViT-B-16-SigLIP2')"
+ENV HF_HUB_OFFLINE=1
+
 # YuNet face detector (OpenCV Zoo), to prefer photos with people in them.
 ADD https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx ./face_detection_yunet.onnx
 # Background music, public domain (CC0) on OpenGameArt:

@@ -3,7 +3,7 @@ Tests for compilation_trigger: the Compilation Job is started once after a run t
 """
 import pytest
 
-from src.compilation_trigger import CloudRunJob, CompilationTrigger, start_all
+from src.compilation_trigger import CloudRunJob, CompilationTrigger, configured_jobs, start_all
 from src.index_outcome import IndexResult, Outcome
 
 
@@ -90,3 +90,13 @@ def test_every_job_is_started_even_when_an_earlier_one_fails_to_start():
     else:
         raise AssertionError("the failure should be raised")
     assert started == ["compile"]
+
+
+def test_the_grouping_embedding_and_compilation_jobs_are_started_in_that_order():
+    environ = {"COMPILE_JOB_NAME": "compile", "EMBED_JOB_NAME": "embed", "GROUP_JOB_NAME": "group", "OTHER": "x"}
+    assert configured_jobs(environ) == ["group", "embed", "compile"]
+
+
+def test_a_job_whose_setting_is_missing_or_empty_is_not_started():
+    assert configured_jobs({"GROUP_JOB_NAME": "", "EMBED_JOB_NAME": "embed"}) == ["embed"]
+    assert configured_jobs({}) == []

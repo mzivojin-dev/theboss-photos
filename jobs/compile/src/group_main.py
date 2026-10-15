@@ -8,12 +8,11 @@ Needs GCP_PROJECT_ID and PREVIEWS_BUCKET (see .env.example). Nothing is deleted.
 import logging
 import os
 import sys
-from typing import Optional
 
 from google.cloud import firestore, storage
 from google.cloud.exceptions import NotFound
 
-from .gcp import PHOTO_INDEX
+from .gcp import PHOTO_INDEX, GcsPreviews
 from .photo_measures import MEASURE_FIELDS
 from .similar_photos import Grouping, IndexedPhoto, run
 
@@ -72,19 +71,6 @@ class FirestorePhotos:
                 "group_size": grouping.size if grouping.size else firestore.DELETE_FIELD,
             })
         batch.commit()
-
-
-class GcsPreviews:
-    def __init__(self, bucket: storage.Bucket):
-        self._bucket = bucket
-
-    def fetch(self, preview_path: str, directory: str) -> Optional[str]:
-        local = os.path.join(directory, os.path.basename(preview_path))
-        try:
-            self._bucket.blob(preview_path).download_to_filename(local)
-        except NotFound:
-            return None
-        return local
 
 
 def main() -> int:

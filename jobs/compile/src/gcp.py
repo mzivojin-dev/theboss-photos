@@ -1,6 +1,6 @@
 """
 Google Cloud adapters: the Photo Index and compilations collections in Firestore, and the GCS
-buckets media is read from and Compilations are written to.
+buckets media is read from and Compilations are written to. Shared by the jobs in this image.
 """
 import os
 from typing import Optional
@@ -89,3 +89,18 @@ class GcsMediaSource:
                 continue
             return local
         return None
+
+
+class GcsPreviews:
+    """Downloads Preview Images from the previews bucket, for the Grouping and Embedding Jobs."""
+
+    def __init__(self, bucket: storage.Bucket):
+        self._bucket = bucket
+
+    def fetch(self, preview_path: str, directory: str) -> Optional[str]:
+        local = os.path.join(directory, os.path.basename(preview_path))
+        try:
+            self._bucket.blob(preview_path).download_to_filename(local)
+        except NotFound:
+            return None
+        return local
